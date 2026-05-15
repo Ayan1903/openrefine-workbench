@@ -56,23 +56,10 @@
 ;; API 呼び出し
 ;; -------------------------
 
-(defn chat-complete
+(defn- chat-complete*
   "GitHub Models API に chat-completion リクエストを送り、
-   アシスタントの応答テキスト（文字列）を返す。
-
-   messages: [{:role \"system\" :content \"...\"} {:role \"user\" :content \"...\"}]
-   opts:
-     :model       — モデルID (default: \"openai/gpt-4.1\")
-     :max-tokens  — 最大トークン数 (default: 2048)
-     :temperature — 温度 (default: 0.2)
-
-   例:
-     (chat-complete [{:role \"user\" :content \"What is JUnit 5?\"}])
-     (chat-complete [{:role \"user\" :content \"...\"}] :model \"openai/gpt-4.1-mini\")"
-  [messages & {:keys [model max-tokens temperature]
-               :or   {model       "openai/gpt-4.1"
-                      max-tokens  2048
-                      temperature 0.2}}]
+   アシスタントの応答テキスト（文字列）を返す（リトライなし内部実装）。"
+  [messages model max-tokens temperature]
   (let [body   (json/generate-string
                  {:model       model
                   :messages    messages
@@ -94,3 +81,37 @@
       (-> (json/parse-string raw true) :choices first :message :content)
       (throw (ex-info "GitHub Models API error"
                       {:status code :body raw})))))
+
+(defn chat-complete
+  "GitHub Models API に chat-completion リクエストを送り、
+   アシスタントの応答テキスト（文字列）を返す。
+   429 Too Many Requests 時は指数バックオフで最大 3 回リトライする。
+
+   messages: [{:role \"system\" :content \"...\"} {:role \"user\" :content \"...\"}]
+   opts:
+     :model       — モデルID (default: \"openai/gpt-4.1\")
+     :max-tokens  — 最大トークン数 (default: 2048)
+     :temperature — 温度 (default: 0.2)
+
+   例:
+     (chat-complete [{:role \"user\" :content \"What is JUnit 5?\"}])
+     (chat-complete [{:role \"user\" :content \"...\"}] :model \"openai/gpt-4.1-mini\")"
+  [messages & {:keys [model max-tokens temperature]
+               :or   {model       "openai/gpt-4.1"
+                      max-tokens  2048
+                      temperature 0.2}}]
+  (loop [attempt 0 wait-sec 60]
+    (let [result (try
+                   {:ok (chat-complete* messages model max-tokens temperature)}
+                   (catch clojure.lang.ExceptionInfo e
+                     (if (= 429 (:status (ex-data e)))
+                       {:retry (ex-data e)}
+                       (throw e))))]
+      (if-let [retry-data (:retry result)]
+        (if (>= attempt 3)
+          (throw (ex-info "GitHub Models API error (max retries)" retry-data))
+          (do
+            (println (str "  [429] レートリミット。" wait-sec "秒後リトライ (" (inc attempt) "/3)..."))
+            (Thread/sleep (* wait-sec 1000))
+            (recur (inc attempt) (* wait-sec 2))))
+        (:ok result)))))

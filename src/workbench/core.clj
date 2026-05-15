@@ -1099,13 +1099,21 @@
     (if dry-run
       candidates
       (mapv (fn [{:keys [class method sql-deps] :as c}]
-              (println (str "  生成中: " class "/" method " ..."))
-              (let [code (gen-test class :trial trial :method method :model model)
-                    result (assoc c :code code)]
-                (when out-dir
-                  (let [dir  (str out-dir "/" class)
-                        path (str dir "/" method ".md")]
-                    (.mkdirs (java.io.File. dir))
-                    (spit path (str "# " class "/" method "\n\n```java\n" code "\n```\n"))))
-                result))
+              (let [dir  (when out-dir (str out-dir "/" class))
+                    path (when out-dir (str dir "/" method ".md"))]
+                (if (and path (.exists (java.io.File. path)))
+                  (do
+                    (println (str "  スキップ（既存）: " class "/" method))
+                    (assoc c :code :skipped))
+                  (try
+                    (println (str "  生成中: " class "/" method " ..."))
+                    (let [code   (gen-test class :trial trial :method method :model model)
+                          result (assoc c :code code)]
+                      (when dir
+                        (.mkdirs (java.io.File. dir))
+                        (spit path (str "# " class "/" method "\n\n```java\n" code "\n```\n")))
+                      result)
+                    (catch Exception e
+                      (println (str "  エラー（スキップ）: " class "/" method " - " (.getMessage e)))
+                      (assoc c :code :error :error-msg (.getMessage e)))))))
             candidates))))
