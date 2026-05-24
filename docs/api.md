@@ -45,6 +45,11 @@ REPL / AI Agent 向けの統合エントリポイント。
 | `(core/jrefs :trial t :prefix cls)` | 呼び出し元クラス名前方一致でフィルタ |
 | `(core/topo-sort)` | クラス依存順トポロジカルソート（切り出し順推定） |
 | `(core/topo-sort :rs jrefs)` | 任意の jrefs を渡してソート |
+| `(core/jsig! paths :trial t)` | Java メソッドシグネチャを `:jsigs` テーブルへ（差分同期） |
+| `(core/jsigs :trial t :class cls)` | `:jsigs` クエリ（trial / class / method でフィルタ） |
+| `(core/tref! paths :trial t)` | テストクラス（`*Test.java`）の構造を `:test-refs` テーブルへ（差分同期） |
+| `(core/trefs :trial t)` | `:test-refs` クエリ（trial / class / target / disabled でフィルタ） |
+| `(core/test-targets :trial t)` | 未カバー × SQL縛りメソッドのうちテストが存在するクラスを返す |
 
 ### 使用例
 
@@ -113,6 +118,24 @@ REPL / AI Agent 向けの統合エントリポイント。
 ;; トポロジカルソート（葉クラスから根クラスへの切り出し順）
 (core/topo-sort)
 (core/topo-sort :rs (core/jrefs :trial "my-trial" :exclude-test true))
+
+;; テストクラス構造を投入（*Test.java → :test-refs テーブル）
+(core/tref! ["trials/experiments/xxx/repo/common-lib/src/test"]
+            :trial "my-project")
+;; => {:put 1549, :delete 0}
+
+;; テストメソッド一覧を取得
+(core/trefs :trial "my-project")                                  ; 全件
+(core/trefs :trial "my-project" :target "DocumentAggregateServiceImpl") ; 対象クラスでフィルタ
+(core/trefs :trial "my-project" :disabled true)                   ; @Disabled のみ
+
+;; 未カバーSQL × テスト存在クラスの交差（「暗闇の中の意味ある失敗」を特定）
+(core/test-targets :trial "my-project")
+;; => [{:class "DocumentAggregateServiceImpl"
+;;      :uncovered-methods ["resolveTargetProcessId" ...]
+;;      :test-methods [{:tref/class "DocumentAggregateServiceImplTest"
+;;                      :tref/method "testResolve_xxx"
+;;                      :tref/disabled? false} ...]}]
 
 ;; ツリー表示
 (core/tree)
@@ -247,6 +270,71 @@ JavaParser で AST 解析し、`:sql-refs` テーブルに取り込む。
 | `:sqlref/sql` | string | アノテーション内の SQL 文字列 |
 | `:sqlref/param-binds` | vector | `#{col}` / `#{param}` 形式の埋め込み変数。`[{:col "colName" :param "paramExpr"}]` |
 | `:sqlref/col-binds` | vector | `table.col = alias.col` 形式の JOIN 縛り条件。`[{:lhs "d.work_process_id" :rhs "cp.source_process_id"}]` |
+
+---
+
+## テストクラス解析 API（tref）
+
+`*Test.java` を JavaParser で AST 解析し、テストメソッド構造を `:test-refs` テーブルに取り込む。  
+`@InjectMocks` でテスト対象クラスを、`@Mock`/`@MockBean` でモック依存を抽出する。
+
+| 関数 | 説明 |
+|---|---|
+| `(core/tref! paths :trial t)` | テストクラスを解析して `:test-refs` テーブルへ（差分同期・冪等） |
+| `(core/trefs :trial t)` | `:test-refs` テーブルの全レコードを返す |
+| `(core/trefs :trial t :class cls)` | テストクラス名でフィルタ |
+| `(core/trefs :trial t :target cls)` | `@InjectMocks` で指定された対象クラス名でフィルタ |
+| `(core/trefs :trial t :disabled true)` | `@Disabled` テストのみ返す |
+| `(core/test-targets :trial t)` | 未カバー SQL × テスト存在クラスの交差クエリ |
+
+### 使用例
+
+```clojure
+;; テストソースディレクトリを指定して投入
+(core/tref! ["repo/common-lib/src/test"] :trial "my-project")
+;; => {:put 1549, :delete 0}
+
+;; 対象クラスでフィルタ（誰がこのクラスをテストしているか）
+(core/trefs :trial "my-project" :target "DocumentAggregateServiceImpl")
+
+;; 無効化されたテストだけ確認
+(core/trefs :trial "my-project" :disabled true)
+
+;; 未カバー SQL メソッドのうち、すでにテストが存在するクラスを特定
+;; 「どの failure が意味のある失敗か」を絞り込む
+(core/test-targets :trial "my-project")
+;; => [{:class "DocumentAggregateServiceImpl"
+;;      :uncovered-methods ["resolveTargetProcessId" ...]
+;;      :test-methods [{:tref/class "DocumentAggregateServiceImplTest"
+;;                      :tref/method "testResolve_xxx"
+;;                      :tref/disabled? false} ...]}
+;;     ...]
+```
+
+### `:test-refs` テーブルスキーマ（`tref!` で投入）
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `:xt/id` | string | `"tref/<trial>/<TestClass>/<testMethod>"` |
+| `:tref/trial` | string \| nil | trial 識別子 |
+| `:tref/class` | string | テストクラス名（例: `DocumentAggregateServiceImplTest`） |
+| `:tref/method` | string | テストメソッド名 |
+| `:tref/target` | string \| nil | `@InjectMocks` で宣言されたテスト対象クラス名 |
+| `:tref/mocks` | vector | `@Mock`/`@MockBean`/`@Spy`/`@SpyBean` の型名リスト |
+| `:tref/disabled?` | bool | `@Disabled` アノテーションが付いていれば `true` |
+| `:tref/package` | string | テストクラスのパッケージ名 |
+| `:tref/file` | string | ソースファイルパス |
+
+**`test-targets` 戻り値スキーマ：**
+
+```clojure
+[{:class             "DocumentAggregateServiceImpl"   ; 対象クラス名
+  :uncovered-methods ["resolveTargetProcessId" ...]   ; covered=0 かつ SQL 縛りあり
+  :test-methods      [{:tref/class     "DocumentAggregateServiceImplTest"
+                       :tref/method    "testXxx"
+                       :tref/disabled? false} ...]}   ; 既存テストメソッド（多い順）
+ ...]
+```
 
 ---
 

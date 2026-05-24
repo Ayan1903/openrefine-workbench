@@ -143,6 +143,17 @@ Java ソース
 ;; メソッドシグネチャ（型情報の精度向上に必須）
 (core/jsig! ["trials/experiments/xxx/repo"] :trial "my-project")
 ;; => {:put 3415, :delete 0}
+
+;; テストクラス構造を投入（*Test.java → :test-refs）
+;; mvn test 実行前に実行すると「暗闇」解消に役立つ
+(core/tref! ["trials/experiments/xxx/repo/common-lib/src/test"]
+            :trial "my-project")
+;; => {:put 1549, :delete 0}
+
+;; テストクラス構造を投入（テストソースディレクトリを指定）
+(core/tref! ["trials/experiments/xxx/repo/common-lib/src/test"]
+            :trial "my-project")
+;; => {:put 1549, :delete 0}
 ```
 
 すべて差分同期・冪等です。2 回実行しても副作用はありません。
@@ -190,6 +201,25 @@ Java ソース
 ;;      :sql-deps ["GenericMasterImportMapper/createGenericMasterImportStagingFile"]}
 ;;     ...]
 ```
+
+### 「暗闇」の中の意味ある失敗を特定（test-targets）
+
+`mvn test` を実行すると大量の failure が出るが、  
+「未カバーかつ SQL 縛りがある」クラスのテストが失敗しているなら、それは **意味のある失敗**です。  
+`test-targets` で優先度高いクラスを特定し、Mock 設定に集中できます。
+
+```clojure
+(core/test-targets :trial "my-project")
+;; => [{:class "DocumentAggregateServiceImpl"
+;;      :uncovered-methods ["resolveTargetProcessId" ...]
+;;      :test-methods [{:tref/class "DocumentAggregateServiceImplTest"
+;;                      :tref/method "testResolve_xxx"
+;;                      :tref/disabled? false} ...]}
+;;     ...]
+```
+
+返り値は `:test-methods` の件数降順でソートされます。  
+件数が多いクラスほど「テストはあるのに未カバーメソッドが残っている」 = Mock 設定が展開されていない可能性が高いクラスです。
 
 ### 全件生成
 
