@@ -421,7 +421,7 @@ JaCoCo XML レポートを解析して XTDB に取り込み、「テストが届
 
 静的解析情報（`:refs` × `:sqlrefs` × `:jacoco`）を統合して、GitHub Models API 経由で JUnit 5 + Mockito テストコードを生成する。
 
-> コンセプト・データフロー・プロンプト構成・制約・使い方手順は [docs/codegen.md](codegen.md) を参照。
+> コンセプト・データフロー・プロンプト構成・制約・使い方手順は [docs/test-amplification.md](test-amplification.md) を参照。
 
 ### 認証
 
