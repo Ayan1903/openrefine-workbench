@@ -1,7 +1,7 @@
-# AI テスト生成ガイド（codegen）
+# テスト増幅ワークフローガイド（test-amplification）
 
 静的解析情報（`:refs` × `:jsigs` × `:sql-refs` × `:jacoco`）を XTDB に集約し、
-GitHub Models API 経由で JUnit 5 + Mockito テストスケルトンを生成するワークフローのガイドです。
+GitHub Models API 経由でテストスケルトンを生成・統合・修正し、カバレッジを増幅するサイクルのガイドです。
 
 API リファレンス（関数一覧・スキーマ・オプション表）は [docs/api.md](api.md) の「AI テスト生成 API（codegen）」セクションを参照してください。
 
