@@ -2209,7 +2209,7 @@
               (println (str "  compile: " (:iters fix) " iters, clean=" (:clean? fix)))
               ;; test → disable ループ（最大 5 回）
               (loop [test-iter 0]
-                (let [mvn (run-mvn-test! repo-root module class)]
+                (let [mvn (run-mvn-test! repo-root module (str class "Test"))]
                   (println (str "  test[" test-iter "]: " (:summary mvn)))
                   (cond
                     ;; 成功 or 上限
