@@ -45,6 +45,8 @@ trial.edn
     ↓
 [generate phase]
     ↓ gen-tests-uncovered でテストスケルトンを生成
+    ↓ merge-all-test-mds で Test.java に統合
+    ↓ fix-tests-dir でコンパイルエラーを修正
     ↓ exports/ に出力
 ```
 
@@ -217,7 +219,15 @@ guix shell -m manifest.scm -- clojure -A:xtdb:repl
 (core/start!)
 (core/jref!  ["trials/experiments/YOUR-TRIAL-ID/repo"])
 (core/jsig!  ["trials/experiments/YOUR-TRIAL-ID/repo"])
+
+;; 1. テストスケルトン生成（未カバー×SQL縛り）
 (core/gen-tests-uncovered "YOUR-TRIAL-ID")
+
+;; 2. .md → Test.java に統合
+(core/merge-all-test-mds "YOUR-TRIAL-ID")
+
+;; 3. コンパイルエラーを AI で修正（mvn test-compile 後に実施）
+(core/fix-tests-dir "YOUR-TRIAL-ID" "<compile-error-log>")
 ```
 
 またはスクリプトで実行：
