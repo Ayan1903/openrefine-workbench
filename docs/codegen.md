@@ -212,38 +212,90 @@ gen-tests/
 
 各 `.md` ファイルは Markdown のコードブロック（` ```java ` ）内に Java コードが入っています。
 
+### .md → Test.java 統合（merge-all-test-mds）
+
+クラス単位の `.md` を 1 つの `*Test.java` にまとめます。  
+同名メソッド・フィールドの重複排除・import の統合を自動で行います。
+
+```clojure
+(core/merge-all-test-mds
+  :gen-dir "trials/experiments/xxx/gen-tests")
+;; => [{:status :merged, :class "DocumentAggregateServiceImpl", :test-count 8} ...]
+```
+
+出力後のレイアウト：
+
+```
+gen-tests/
+  DocumentAggregateServiceImpl/
+    resolveTargetProcessId.md          ← 素材（保持）
+    getTargetDocumentTypes.md          ← 素材（保持）
+    DocumentAggregateServiceImplTest.java  ← ★ 統合済み Java ファイル
+```
+
 ---
 
 ## 生成コードを使うまでの手順
 
-### 1. パッケージ宣言を修正する
+### 1. Test.java をテストディレクトリにコピーする
 
-生成コードは `package your.package;` の仮置きになっています。  
-テスト対象クラスのパッケージ名に合わせて書き換えてください。
+`merge-all-test-mds` で生成した `*Test.java` を、テスト対象クラスのパッケージパスと  
+**同じディレクトリ構造** に配置します。
 
-```java
-// 生成コード（仮置き）
-package your.package;
-
-// 実際のパッケージに修正
-package com.example.tradehub.service;
+```bash
+# 例: DocumentAggregateServiceImpl → subtotal/service/impl/ パッケージ
+cp gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java \
+   repo/common-lib/src/test/java/com/example/subtotal/service/impl/
 ```
 
-### 2. インポートを補完する
+### 2. コンパイルエラーを確認する
 
-生成コードには `import` 文が含まれないか、不完全な場合があります。  
-IDE の「未解決シンボルの自動インポート」機能（IntelliJ: `Alt+Enter`）で補完してください。
-
-### 3. `.java` ファイルに配置する
-
-テスト対象クラスのパッケージに対応するディレクトリに配置します。
-
-```
-src/test/java/com/example/tradehub/service/
-  DocumentAggregateServiceImplTest.java
+```bash
+MAVEN_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED" \
+  guix shell 'openjdk@21:jdk' maven -- \
+  ./mvnw test-compile -pl common-lib
 ```
 
-### 4. `expected` 値を埋める
+### 3. コンパイルエラーを AI で修正する（fix-tests-dir）
+
+`fix-tests-dir` はコンパイルエラーを自動取得して AI に渡し、テストシナリオを保持したまま修正します。
+
+```clojure
+(core/fix-tests-dir
+  :gen-dir  "trials/experiments/xxx/gen-tests"
+  :trial    "my-project"
+  :src-root "trials/experiments/xxx/repo/common-lib/src/main/java"
+  :mvn-root "trials/experiments/xxx/repo"
+  :module   "common-lib")
+```
+
+コンパイルエラーが複数ラウンドにわたる場合は、test-compile → fix-tests-dir を繰り返します。  
+エラーが解消できないメソッドは `// TODO: fix` でボディをクリアして BUILD SUCCESS を優先します。
+
+### 4. mvn verify を実行して JaCoCo レポートを生成する
+
+```bash
+MAVEN_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED" \
+  guix shell 'openjdk@21:jdk' maven -- \
+  ./mvnw verify -pl common-lib -Dmaven.test.failure.ignore=true
+```
+
+### 5. JaCoCo XML を XTDB に再投入する
+
+```clojure
+(core/jacoco! "trials/experiments/xxx/repo/common-lib/target/site/jacoco/jacoco.xml"
+              :trial "my-project")
+
+;; カバレッジ確認
+(let [stats (core/jacocos :trial "my-project")]
+  (println "covered:" (reduce + (map #(or (:jacoco/covered %) 0) stats)))
+  (println "missed:"  (reduce + (map #(or (:jacoco/missed %)  0) stats))))
+
+;; 残件確認 → 改善サイクルへ
+(count (core/uncovered-sql-methods :trial "my-project"))
+```
+
+### 6. `expected` 値を埋める（手動）
 
 ```java
 // 生成コード（AI の推測）
@@ -281,75 +333,6 @@ assertEquals(ProcessStatus.COMPLETED, result.get(0).getStatus());
 分離の理由：
 - `.md` は人間・AI が手を入れる前の「素材」。試行ごとに保存しておくことでモデル変更や prompt 改善の効果を比較できる。
 - 修正済み `.java` は Maven が直接実行する成果物。`.md` との差分が「AI エージェントが補った量」の記録になる。
-
----
-
-## スケルトン → テストパスまでの実践ガイド
-
-### ステップ 1：.md からコードブロックを抽出する
-
-生成ファイルは Markdown のコードブロック（` ```java ` ）内に Java コードが入っています。
-
-```bash
-# コードブロック部分だけを取り出す（``` 行を除く）
-awk '/^```java/{p=1;next} /^```/{p=0} p' DocumentAggregateServiceImplTest.md \
-  > DocumentAggregateServiceImplTest.java
-```
-
-### ステップ 2：パッケージ宣言を実ソースと照合して修正する
-
-生成コードは `package your.package;` の仮置きです。
-
-```bash
-# テスト対象クラスのパッケージ名を確認
-head -3 repo/.../DocumentAggregateServiceImpl.java
-# → package com.tradehub.web.subtotal.service.impl;
-```
-
-テストのパッケージは通常 **同じパッケージ**（`@InjectMocks` でパッケージプライベートメンバーにアクセスするため）。
-
-```java
-// 修正前
-package your.package;
-
-// 修正後
-package com.tradehub.web.subtotal.service.impl;
-```
-
-### ステップ 3：Mock の型・Mapper 戻り値型を実ソースと照合して修正する
-
-AI は戻り値型を推測します。Mapper インターフェースの実際の戻り値型と一致しているか確認してください。
-
-```bash
-# Mapper の戻り値型を確認
-grep -n "List\|Optional\|Integer\|UUID" DocumentAggregateMapper.java
-```
-
-よくある不一致：
-
-| AI の推測 | 実際 |
-|---|---|
-| `List<Map<String, Object>>` | `List<DocumentAggregateEntity>` |
-| `int` | `Integer` |
-| `String` | `UUID` |
-
-### ステップ 4：テストディレクトリに配置する
-
-テスト対象クラスのパッケージパスと **同じディレクトリ構造** に置くことで、パッケージプライベートメンバーへのアクセスが有効になります。
-
-```
-src/test/java/com/tradehub/web/subtotal/service/impl/
-  DocumentAggregateServiceImplTest.java
-```
-
-### ステップ 5：mvn test を実行する
-
-```bash
-# Java 21 + cglib の場合は MAVEN_OPTS 必須
-MAVEN_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED" \
-  guix shell 'openjdk@21:jdk' maven -- \
-  mvn test -pl common-lib -Dtest=DocumentAggregateServiceImplTest
-```
 
 ---
 

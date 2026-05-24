@@ -509,3 +509,91 @@ JaCoCo XML レポートを解析して XTDB に取り込み、「テストが届
 | `:model` | `"openai/gpt-4.1"` | 使用する GitHub Models モデル |
 | `:out-dir` | `nil` | 指定すると `<out-dir>/<ClassName>/<method>.md` に書き出す |
 | `:dry-run` | `false` | `true` のとき API を呼ばず候補一覧だけ返す |
+
+---
+
+## テストスケルトン統合・修正 API
+
+`gen-tests-uncovered` で生成した `.md` スケルトンを Java ファイルに統合し、  
+コンパイルエラーを AI で修正するためのユーティリティ群。
+
+### 使用例
+
+```clojure
+;; 1. .md → Test.java 統合（クラス単位）
+(core/merge-test-mds
+  :class   "ProjectServiceImpl"
+  :gen-dir "trials/experiments/2026-04-28-tradehub/exports/gen-tests")
+;; => {:status :merged, :class "ProjectServiceImpl", :test-count 42}
+
+;; 2. .md → Test.java 統合（全クラス一括）
+(core/merge-all-test-mds
+  :gen-dir "trials/experiments/2026-04-28-tradehub/exports/gen-tests")
+
+;; 3. 既存の Test.java をコンパイルエラーを元に AI で修正（クラス単位）
+(core/fix-test "ActivityRecordServiceImpl"
+  :trial    "2026-04-28-tradehub"
+  :src-root "trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java"
+  :java-path "trials/experiments/2026-04-28-tradehub/exports/gen-tests/ActivityRecordServiceImpl/ActivityRecordServiceImplTest.java"
+  :mvn-root "trials/experiments/2026-04-28-tradehub/repo"
+  :module   "common-lib")
+
+;; 4. gen-tests/ 以下の全 *Test.java を一括修正
+(core/fix-tests-dir
+  :gen-dir  "trials/experiments/2026-04-28-tradehub/exports/gen-tests"
+  :trial    "2026-04-28-tradehub"
+  :src-root "trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java"
+  :mvn-root "trials/experiments/2026-04-28-tradehub/repo"
+  :module   "common-lib")
+```
+
+### `merge-test-mds` / `merge-all-test-mds`
+
+`.md` スケルトンから `.java` テストファイルを組み立てる。  
+同名メソッドの重複排除・import の統合・フィールド宣言の重複排除を行う。
+
+| 関数 | 説明 |
+|---|---|
+| `(core/merge-test-mds :class c :gen-dir d)` | `<gen-dir>/<c>/` の *.md を統合して `<c>Test.java` を生成 |
+| `(core/merge-test-mds ... :force true)` | 既存 `.java` を上書き |
+| `(core/merge-all-test-mds :gen-dir d)` | `<gen-dir>/` 以下の全クラスに一括適用 |
+
+戻り値（`merge-test-mds`）: `{:status :merged|:skipped|:no-mds, :class c, :test-count n}`
+
+### `fix-test` / `fix-tests-dir`
+
+既存の `*Test.java` にコンパイルエラーがある場合、`test-context` の情報を使って AI で修正する。  
+テストシナリオ（`@Test` の意図）を保持したまま hallucination（型不一致・存在しないメソッドなど）だけを修正する。
+
+| オプション | 説明 |
+|---|---|
+| `:trial` | トライアル識別子 |
+| `:src-root` | プロダクションコードのルート（シグネチャ解決用） |
+| `:java-path` | 修正対象の `.java` ファイルパス |
+| `:mvn-root` | `mvnw` があるディレクトリ（コンパイルエラー自動取得） |
+| `:module` | Maven `-pl` モジュール名（`mvn-root` 指定時） |
+| `:errors` | コンパイルエラー文字列（直接渡す場合、`mvn-root` より優先） |
+| `:model` | 使用モデル（デフォルト: `"openai/gpt-4.1"`） |
+| `:dest-dir` | 修正済みファイルの出力先（`fix-tests-dir` のみ。省略時は上書き） |
+| `:force` | `true` のとき `dest-dir` に既存ファイルがあっても上書き（`fix-tests-dir` のみ） |
+| `:dry-run` | `true` のとき API を呼ばず対象ファイル一覧のみ表示（`fix-tests-dir` のみ） |
+
+### テスト増幅の全体フロー
+
+```
+1. gen-tests-uncovered  → exports/gen-tests/<Class>/<method>.md  (AI 生成スケルトン)
+       ↓
+2. merge-all-test-mds   → exports/gen-tests/<Class>/<Class>Test.java  (md を統合)
+       ↓
+3. （手動）Test.java を src/test/java/ 以下にコピー
+       ↓
+4. mvn test-compile     → コンパイルエラー確認
+       ↓
+5. fix-tests-dir        → コンパイルエラーを AI で修正（反復）
+       ↓
+6. mvn verify           → JaCoCo XML 生成
+       ↓
+7. jacoco!              → XTDB に再投入
+       ↓
+8. uncovered-sql-methods → 残件確認 → 1. へ戻る
+```
