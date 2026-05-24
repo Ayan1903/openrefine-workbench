@@ -1754,6 +1754,51 @@
   (->> block
        (some #(when-let [m (re-find #"(?:void|[\w<>\[\]]+)\s+(\w+)\s*\(" %)] (second m)))))
 
+(defn- extract-test-methods-from-md
+  "md 文字列から @Test メソッドブロック（直前コメント含む）のベクタを返す。
+   ``` フェンス行を除去して解析する。ブレースが不均衡なブロックは除外する。
+   per-method md（package/class 宣言なし）と フルクラス md の両形式に対応。"
+  [md-str]
+  (let [lines (->> (str/split-lines md-str)
+                   (remove #(re-matches #"\s*```.*" %))
+                   vec)
+        n     (count lines)]
+    (loop [i 0 results []]
+      (cond
+        (>= i n) results
+
+        ;; @Test 行を発見
+        (re-matches #"\s*@Test\s*" (nth lines i))
+        (let [;; @Test 直前のコメント行を遡る（空白行や非コメント行で止まる）
+              start (loop [j (dec i)]
+                      (if (and (>= j 0)
+                               (let [t (str/trim (nth lines j))]
+                                 (or (str/starts-with? t "//")
+                                     (str/starts-with? t "/*")
+                                     (str/starts-with? t "*"))))
+                        (recur (dec j))
+                        (inc j)))
+              ;; @Test 行から閉じ } まで収集（深さが 0 に戻ったとき終了）
+              [end-i block-lines]
+              (loop [j i depth 0 entered? false acc []]
+                (if (>= j n)
+                  [nil acc]
+                  (let [line  (nth lines j)
+                        opens (count (filter #{\{} line))
+                        clses (count (filter #{\}} line))
+                        nd    (+ depth opens (- clses))]
+                    (if (and entered? (zero? nd))
+                      [(inc j) (conj acc line)]
+                      (recur (inc j) nd (or entered? (pos? opens)) (conj acc line))))))]
+          (if end-i
+            (let [comment-lines (subvec lines start i)
+                  full-block    (str/join "\n" (concat comment-lines block-lines))]
+              (recur end-i (conj results full-block)))
+            ;; ブレース不均衡: スキップ
+            (recur (inc i) results)))
+
+        :else (recur (inc i) results)))))
+
 (defn merge-test-mds
   "gen-tests/<class-name>/ 配下の *.md を統合して <class-name>Test.java を生成する。
    既に .java が存在する場合はスキップ（:force true で上書き）。
@@ -1885,3 +1930,57 @@
              :gen-dir gen-dir
              :force   force)
           class-dirs)))
+
+(defn patch-test-from-mds
+  "gen-tests/<class-name>/ 配下の per-method *.md から @Test メソッドを抽出し、
+   既存の Java テストファイルに追記する。
+   クラスレベルの @Disabled(\"AI生成テスト: 要修正\") も除去する。
+
+   opts:
+     :class     - クラス名（例 \"ProjectServiceImpl\"）
+     :gen-dir   - gen-tests の基底ディレクトリ
+     :dest-file - 更新対象の Java テストファイルパス
+
+   戻り値: {:status :patched, :class class, :added n, :skipped-dup m}
+
+   例:
+     (patch-test-from-mds
+       :class     \"ProjectServiceImpl\"
+       :gen-dir   \"trials/experiments/2026-04-28-tradehub/exports/gen-tests\"
+       :dest-file \"trials/.../repo/.../ProjectServiceImplTest.java\")"
+  [& {:keys [class gen-dir dest-file]}]
+  (let [md-dir   (java.io.File. (str gen-dir "/" class))
+        md-files (->> (file-seq md-dir)
+                      (filter #(and (.isFile %)
+                                    (str/ends-with? (.getName %) ".md")))
+                      sort)
+        ;; md から @Test メソッドを抽出してメソッド名でユニーク化
+        new-methods (->> md-files
+                         (mapcat #(extract-test-methods-from-md (slurp %)))
+                         (reduce (fn [{:keys [seen ms]} m]
+                                   (let [k (second (re-find #"void\s+(\w+)\s*\(" m))]
+                                     (if (and k (not (contains? seen k)))
+                                       {:seen (conj seen k) :ms (conj ms m)}
+                                       {:seen seen :ms ms})))
+                                 {:seen #{} :ms []})
+                         :ms)
+        existing       (slurp dest-file)
+        existing-names (into #{} (map second (re-seq #"void\s+(\w+)\s*\(" existing)))
+        ;; 既存にない新メソッドのみ
+        to-add         (remove #(existing-names (second (re-find #"void\s+(\w+)\s*\(" %)))
+                               new-methods)
+        skipped        (- (count new-methods) (count to-add))
+        ;; クラスレベルの @Disabled を除去
+        patched        (str/replace existing
+                                    #"(?m)^\s*@Disabled\(\"AI生成テスト: 要修正\"\)\s*\r?\n" "")
+        ;; 最後の } の前に新メソッドを挿入
+        last-brace     (.lastIndexOf ^String patched "}")
+        patched        (if (and (seq to-add) (>= last-brace 0))
+                         (str (subs patched 0 last-brace)
+                              "\n"
+                              (str/join "\n\n" to-add)
+                              "\n}\n")
+                         patched)]
+    (spit dest-file patched)
+    (println (str "  " class ": " (count to-add) " メソッド追加, " skipped " 件スキップ（重複）"))
+    {:status :patched :class class :added (count to-add) :skipped-dup skipped}))
