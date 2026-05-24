@@ -345,6 +345,87 @@
       method (filter #(= method (:jsig/method %))))))
 
 ;; -------------------------
+;; メソッドボディ抽出（:jbodies テーブル）
+;; -------------------------
+
+(defn- method->body-doc
+  "MethodDeclaration 1 件を :jbodies ドキュメントに変換する。
+   ボディは 4000 文字を上限として切り捨てる（トークン節約）。"
+  [^MethodDeclaration md cls-name pkg trial]
+  (let [mname  (.getNameAsString md)
+        ptypes (str/join "," (->> (.getParameters md) (map #(.asString (.getType %)))))
+        body   (-> (.getBody md)
+                   (.map #(.toString %))
+                   (.orElse nil))]
+    (when body
+      {:xt/id         (str "jbody/" (or trial "_") "/" cls-name "/" mname "(" ptypes ")")
+       :jbody/trial   trial
+       :jbody/package pkg
+       :jbody/class   cls-name
+       :jbody/method  mname
+       :jbody/body    (subs body 0 (min (count body) 4000))})))
+
+(defn- extract-bodies-from-file
+  "1 つの .java ファイルを解析し、:jbodies ドキュメントのシーケンスを返す。"
+  [^java.io.File f trial]
+  (try
+    (let [cu  (StaticJavaParser/parse f)
+          pkg (-> cu .getPackageDeclaration
+                  (.map #(.getNameAsString %))
+                  (.orElse ""))]
+      (->> (.findAll cu ClassOrInterfaceDeclaration)
+           (mapcat (fn [^ClassOrInterfaceDeclaration cls]
+                     (let [cls-name (.getNameAsString cls)]
+                       (->> (.findAll cls MethodDeclaration)
+                            (keep #(method->body-doc % cls-name pkg trial))))))))
+    (catch Exception e
+      (binding [*out* *err*]
+        (println (str "[jbody] parse error: " (.getName f) " — " (.getMessage e))))
+      [])))
+
+(defn jbody!
+  "Java ソースのメソッドボディを XTDB :jbodies テーブルに取り込む（差分同期・冪等）。
+
+   paths: 解析対象パスのベクタ（src/main/java ルート等）
+   opts:
+     :trial - トライアル識別子
+
+   例:
+     (jbody! node [\"trials/experiments/2026-04-28-tradehub/repo\"] :trial \"tradehub\")"
+  [node paths & {:keys [trial]}]
+  (let [docs    (->> paths
+                     (mapcat java-files)
+                     (mapcat #(extract-bodies-from-file % trial))
+                     vec)
+        new-ids (set (map :xt/id docs))
+        old-ids (->> (xt/q node '(from :jbodies [{:xt/id id :jbody/trial t}]))
+                     (filter #(= (:t %) trial))
+                     (map :id)
+                     set)
+        to-del  (set/difference old-ids new-ids)]
+    (when (seq to-del)
+      (xt/execute-tx node (mapv #(vector :delete-docs :jbodies %) to-del)))
+    (doseq [batch (partition-all 2000 docs)]
+      (xt/execute-tx node (mapv #(vector :put-docs :jbodies %) batch)))
+    {:put (count docs) :delete (count to-del)}))
+
+(defn jbodies
+  "XTDB :jbodies テーブルからメソッドボディを返す。
+   opts:
+     :trial  - トライアル識別子でフィルタ
+     :class  - クラス名（シンプル名）でフィルタ
+     :method - メソッド名でフィルタ
+
+   例:
+     (jbodies node :trial \"tradehub\" :class \"AclServiceImpl\" :method \"updateRow1\")"
+  [node & {:keys [trial class method]}]
+  (let [rs (xt/q node '(from :jbodies [*]))]
+    (cond->> rs
+      trial  (filter #(= trial (:jbody/trial %)))
+      class  (filter #(= class (:jbody/class %)))
+      method (filter #(= method (:jbody/method %))))))
+
+;; -------------------------
 ;; テストクラス解析（:test-refs テーブル）
 ;; -------------------------
 

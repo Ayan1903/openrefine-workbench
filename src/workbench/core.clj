@@ -164,6 +164,30 @@
   [& {:keys [trial class target disabled]}]
   (jref/trefs (node) :trial trial :class class :target target :disabled disabled))
 
+(defn jbody!
+  "Java ソースのメソッドボディを XTDB :jbodies テーブルに取り込む（差分同期・冪等）。
+
+   opts:
+     :trial - トライアル識別子
+
+   例:
+     (jbody! [\"trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java\"]
+             :trial \"2026-04-28-tradehub\")"
+  [paths & {:keys [trial]}]
+  (jref/jbody! (node) paths :trial trial))
+
+(defn jbodies
+  "XTDB :jbodies テーブルからメソッドボディを返す。
+   opts:
+     :trial  - トライアル識別子でフィルタ
+     :class  - クラス名（シンプル名）でフィルタ
+     :method - メソッド名でフィルタ
+
+   例:
+     (jbodies :trial \"2026-04-28-tradehub\" :class \"AclServiceImpl\" :method \"updateRow1\")"
+  [& {:keys [trial class method]}]
+  (jref/jbodies (node) :trial trial :class class :method method))
+
 (defn sqlref!
   "Java ソースの MyBatis @Select 等アノテーション SQL を解析して
    XTDB :sql-refs テーブルに取り込む。
@@ -965,7 +989,9 @@
                                         [% vals]))
                                (into {})))
         ;; 既存テストクラス（@InjectMocks でこのクラスを指している *Test.java）
-        existing-tests  (trefs :trial trial :target class-name)]
+        existing-tests  (trefs :trial trial :target class-name)
+        ;; 対象メソッドの実装ボディ（:jbodies テーブル — jbody! 実行済みの場合のみ有効）
+        impl-bodies     (jbodies :trial trial :class class-name)]
     {:trial           trial
      :class           class-name
      :method          method
@@ -978,7 +1004,8 @@
      :coverage        cov
      :signatures      signatures
      :src-imports     src-imports
-     :existing-tests  existing-tests}))
+     :existing-tests  existing-tests
+     :impl-bodies     impl-bodies}))
 
 (defn gen-test
   "test-context の情報を AI に渡して JUnit 5 + Mockito テストコードを生成する。
@@ -1052,6 +1079,16 @@
         (when (seq (:src-imports ctx))
           (str "## 実際の import（必ずこれをそのまま使うこと。ここにない型は架空の import を生成しないこと）\n"
                (str/join "\n" (:src-imports ctx)) "\n\n"))
+        ;; 実装ボディ（jbody! 実行済みの場合のみ有効）
+        ;; method 指定時はそのメソッドのみ、未指定時は全メソッド
+        impl-bodies-flt (cond->> (:impl-bodies ctx)
+                          method (filter #(= method (:jbody/method %))))
+        impl-bodies-txt
+        (when (seq impl-bodies-flt)
+          (str/join "\n\n"
+            (map (fn [b]
+                   (str "// " (:jbody/method b) "\n" (:jbody/body b)))
+                 impl-bodies-flt)))
         ;; 依存クラスのメソッドシグネチャ
         dep-sig-txt
         (if (seq (:dep-signatures ctx))
@@ -1097,6 +1134,9 @@
              (when pkg (str "パッケージ: " pkg "\n"))
              "\n"
              (or import-txt "")
+             (when impl-bodies-txt
+               (str "## 実装コード（以下に記載のAPIのみ使うこと。存在しないメソッドを呼ばないこと）\n"
+                    "```java\n" impl-bodies-txt "\n```\n\n"))
              (when existing-tests-txt
                (str "## 既存テストクラス（以下の構造に合わせてメソッドを追記すること。@Mock や既存メソッドは再宣言しない）\n"
                     existing-tests-txt "\n\n"))
