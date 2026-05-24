@@ -2091,3 +2091,169 @@
         {:status :done :class class
          :disabled (- (count failed) (count not-found))
          :not-found not-found}))))
+
+;; -------------------------
+;; バッチ増幅処理（amplify-class! / amplify-all!）
+;; -------------------------
+
+(defn- find-test-java
+  "module-root 配下で <ClassName>Test.java を最初に発見して java.io.File で返す。"
+  [module-root class-name]
+  (->> (file-seq (io/file module-root))
+       (filter #(= (.getName ^java.io.File %) (str class-name "Test.java")))
+       first))
+
+(defn- mvn-sh
+  "guix shell 'openjdk@21:jdk' maven -- ./mvnw <args> を sh で実行する。
+   :out :err :exit を含む map を返す。"
+  [mvn-root & args]
+  (sh "sh" "-c"
+      (str "cd " mvn-root
+           " && MAVEN_OPTS='--add-opens java.base/java.lang=ALL-UNNAMED'"
+           " guix shell 'openjdk@21:jdk' maven -- ./mvnw "
+           (str/join " " args)
+           " 2>&1")))
+
+(defn- fix-compile-fast!
+  "コンパイルエラーのある @Test メソッドを反復的に空化する（AI 不使用・高速）。
+   戻り値: {:iters n :clean? bool}"
+  [dest-file mvn-root module & {:keys [max-iters] :or {max-iters 30}}]
+  (let [test-file-name (.getName (io/file dest-file))]
+    (loop [i 0]
+      (if (>= i max-iters)
+        {:iters i :clean? false}
+        (let [{:keys [out]} (mvn-sh mvn-root "test-compile" "-pl" module "--no-transfer-progress")
+              err-lines     (filter #(re-find #"\[ERROR\]|error:" %) (str/split-lines out))
+              first-err-line
+              (some (fn [line]
+                      (when-let [[_ ln] (re-find
+                                          (re-pattern (str (java.util.regex.Pattern/quote test-file-name)
+                                                           ":\\[(\\d+),"))
+                                          line)]
+                        (Long/parseLong ln)))
+                    err-lines)]
+          (if-not first-err-line
+            {:iters i :clean? (empty? err-lines)}
+            (let [lines   (vec (str/split-lines (slurp dest-file)))
+                  n       (count lines)
+                  idx     (dec (min first-err-line n))
+                  test-i  (loop [j idx]
+                            (cond (< j 0)                       nil
+                                  (re-find #"@Test\b" (nth lines j)) j
+                                  :else                          (recur (dec j))))
+                  brace-i (when test-i
+                            (loop [j test-i]
+                              (when (< j n)
+                                (if (str/includes? (nth lines j) "{") j (recur (inc j))))))]
+              (if-not brace-i
+                {:iters i :clean? false}
+                (let [end-i    (loop [j brace-i depth 0]
+                                 (when (< j n)
+                                   (let [d (+ depth
+                                              (count (filter #{\{} (nth lines j)))
+                                              (- (count (filter #{\}} (nth lines j)))))]
+                                     (if (zero? d) j (recur (inc j) d)))))
+                      indent   (or (re-find #"^\s+" (nth lines test-i)) "    ")
+                      already? (some #(str/includes? % "@Disabled")
+                                     (subvec lines (max 0 (- test-i 2)) (inc test-i)))
+                      brace-l  (nth lines brace-i)
+                      sig      (subs brace-l 0 (inc (.lastIndexOf ^String brace-l "{")))
+                      new-block (cond-> []
+                                  (not already?) (conj (str indent "@Disabled(\"compile-error: AI generated\")"))
+                                  true           (into (subvec lines test-i brace-i))
+                                  true           (conj sig)
+                                  true           (conj (str indent "}")))
+                      new-lines (concat (subvec lines 0 test-i)
+                                        new-block
+                                        (when end-i (subvec lines (inc end-i))))
+                      content   (ensure-disabled-import (str/join "\n" new-lines))]
+                  (spit dest-file content)
+                  (recur (inc i)))))))))))
+
+(defn- run-mvn-test!
+  "mvnw test を実行する。test-class が非 nil なら -Dtest=<class> を付ける。
+   戻り値: {:failures? bool :summary str}"
+  [mvn-root module test-class]
+  (let [{:keys [out exit]}
+        (mvn-sh mvn-root "test" "-pl" module
+                (when test-class (str "-Dtest=" test-class))
+                "--no-transfer-progress")]
+    {:failures? (pos? exit)
+     :summary   (or (re-find #"Tests run: \d+[^\n]*" out) "(no summary)")}))
+
+(defn amplify-class!
+  "1クラスについて patch-test-from-mds → compile fix → test → disable-failing のサイクルを実行する。
+
+   opts:
+     :class      - クラス名（例 \"IdaServiceImpl\"）
+     :gen-dir    - gen-tests 基底ディレクトリ
+     :repo-root  - mvnw があるディレクトリ
+     :module     - Maven モジュール名（例 \"common-lib\"）
+     :dest-file  - テストファイルパス（省略時は repo-root/module 以下を自動探索）
+
+   戻り値: {:class :added :fix-iters :test-iters :success?}"
+  [& {:keys [class gen-dir repo-root module dest-file]}]
+  (let [surefire-dir (str repo-root "/" module "/target/surefire-reports")
+        dest         (or dest-file
+                         (some-> (find-test-java (str repo-root "/" module) class)
+                                 .getPath))]
+    (if-not dest
+      (do (println (str "[SKIP] " class ": テストファイルが見つかりません")) nil)
+      (do
+        (println (str "\n=== " class " ==="))
+        (let [patch (patch-test-from-mds :class class :gen-dir gen-dir :dest-file dest)]
+          (if (zero? (:added patch))
+            (assoc patch :fix-iters 0 :test-iters 0 :success? true)
+            ;; compile fix
+            (let [fix (fix-compile-fast! dest repo-root module)]
+              (println (str "  compile: " (:iters fix) " iters, clean=" (:clean? fix)))
+              ;; test → disable ループ（最大 5 回）
+              (loop [test-iter 0]
+                (let [mvn (run-mvn-test! repo-root module class)]
+                  (println (str "  test[" test-iter "]: " (:summary mvn)))
+                  (if (or (not (:failures? mvn)) (>= test-iter 5))
+                    (assoc patch :fix-iters (:iters fix) :test-iters test-iter
+                                 :success? (not (:failures? mvn)))
+                    (let [dis (disable-failing-tests
+                                :class class :surefire-dir surefire-dir :dest-file dest)]
+                      (if (zero? (:disabled dis))
+                        (assoc patch :fix-iters (:iters fix) :test-iters test-iter :success? false)
+                        (recur (inc test-iter))))))))))))))
+
+(defn amplify-all!
+  "gen-tests/ 配下の全クラス（または指定クラスリスト）に amplify-class! を一括適用する。
+
+   opts:
+     :gen-dir   - gen-tests 基底ディレクトリ
+     :repo-root - mvnw があるディレクトリ
+     :module    - Maven モジュール名（例 \"common-lib\"）
+     :classes   - 処理対象クラス名のリスト（省略時は gen-dir 直下の全ディレクトリ）
+
+   例:
+     (amplify-all!
+       :gen-dir   \"trials/experiments/2026-04-28-tradehub/exports/gen-tests\"
+       :repo-root \"trials/experiments/2026-04-28-tradehub/repo\"
+       :module    \"common-lib\"
+       :classes   [\"IdaServiceImpl\" \"ActivityRecord\" \"FileServiceImpl\"])"
+  [& {:keys [gen-dir repo-root module classes]}]
+  (let [gen-file   (io/file gen-dir)
+        class-names (or classes
+                        (->> (.listFiles gen-file)
+                             (filter #(.isDirectory ^java.io.File %))
+                             (map #(.getName ^java.io.File %))
+                             sort))]
+    (println (str "=== amplify-all! 対象: " (count class-names) " クラス ==="))
+    (let [results (mapv (fn [c]
+                          (try
+                            (amplify-class! :class c :gen-dir gen-dir
+                                            :repo-root repo-root :module module)
+                            (catch Exception e
+                              (println (str "ERROR [" c "]: " (.getMessage e)))
+                              {:class c :status :error})))
+                        class-names)
+          ok   (count (filter :success? results))
+          skip (count (filter #(zero? (:added % 0)) results))
+          err  (count (filter #(= :error (:status %)) results))]
+      (println (str "\n--- 完了 ---"))
+      (println (str "成功: " ok " / スキップ(追加なし): " skip " / エラー: " err))
+      results)))
