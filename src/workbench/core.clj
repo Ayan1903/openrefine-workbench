@@ -267,6 +267,90 @@
       (filter #(zero? (:covered-methods %)) rows)
       rows)))
 
+(defn disabled-report
+  "@Disabled テストと JaCoCo カバレッジを突き合わせて優先度レポートを返す。
+
+   テストクラスに @InjectMocks で宣言されたプロダクションクラスを JaCoCo と照合し、
+   カバレッジが低い順（修正優先度が高い順）にソートして返す。
+
+   opts:
+     :test-paths   - テストソースディレクトリのベクタ（tref! 投入先。省略時は再投入しない）
+     :trial        - :test-refs の trial 識別子
+     :jacoco-trial - JaCoCo の trial 識別子（省略時は :trial と同じ）
+     :print?       - true のとき結果を標準出力に表示（デフォルト true）
+
+   戻り値のマップキー:
+     :target          - プロダクションクラス名
+     :disabled        - @Disabled テスト数
+     :jacoco-methods  - JaCoCo 登録メソッド数（-1 なら JaCoCo データなし）
+     :covered-methods - JaCoCo カバー済みメソッド数
+     :coverage-pct    - カバレッジ % (0〜100、-1 は不明)
+     :priority        - :high / :medium / :low / :unknown
+
+   例:
+     (disabled-report
+       :test-paths [\"trials/experiments/2026-04-28-tradehub/repo/common-lib/src/test\"]
+       :trial       \"2026-04-28-tradehub\"
+       :jacoco-trial \"tradehub\")"
+  [& {:keys [test-paths trial jacoco-trial print?]
+      :or   {print? true}}]
+  (let [jacoco-trial (or jacoco-trial trial)]
+    ;; test-refs 投入（オプション）
+    (when (seq test-paths)
+      (print "[disabled-report] ingesting test refs...")
+      (flush)
+      (tref! test-paths :trial trial)
+      (println " done."))
+    (let [disabled-tests (trefs :trial trial :disabled true)
+          ;; JaCoCo インデックス（クラス名 → メソッドリスト）
+          jc-index (->> (jacocos :trial jacoco-trial)
+                        (group-by :jacoco/class-simple))
+          ;; target が nil の場合はクラス名から "Test" を除いてフォールバック
+          resolve-target (fn [t cls]
+                           (or t (str/replace cls #"Test$" "")))
+          rows (->> disabled-tests
+                    (group-by (fn [r]
+                                (resolve-target (:tref/target r) (:tref/class r))))
+                    (map (fn [[target tests]]
+                           (let [jc-methods (get jc-index target)
+                                 total-m    (if jc-methods (count jc-methods) -1)
+                                 covered-m  (if jc-methods
+                                              (count (filter #(pos? (:jacoco/covered %)) jc-methods))
+                                              -1)
+                                 pct        (cond
+                                              (nil? jc-methods)     -1
+                                              (zero? total-m)       0
+                                              :else (Math/round (* 100.0 (/ covered-m total-m))))
+                                 priority   (cond
+                                              (neg? pct)    :unknown
+                                              (zero? pct)   :high
+                                              (< pct 50)    :medium
+                                              :else         :low)]
+                             {:target          target
+                              :disabled        (count tests)
+                              :jacoco-methods  total-m
+                              :covered-methods covered-m
+                              :coverage-pct    pct
+                              :priority        priority})))
+                    (sort-by (juxt :coverage-pct :disabled)))]
+      (when print?
+        (println (str "\n=== @Disabled × JaCoCo カバレッジ レポート (" (count rows) " クラス) ==="))
+        (println (format "%-50s %8s %8s %6s" "対象クラス(prod)" "@Disabled" "JaCoCo%" "優先度"))
+        (println (apply str (repeat 76 "-")))
+        (doseq [r rows]
+          (let [pct-str (if (neg? (:coverage-pct r)) " N/A" (str (:coverage-pct r) "%"))
+                pri-str (case (:priority r)
+                          :high    "🔴 高"
+                          :medium  "🟡 中"
+                          :low     "🟢 低"
+                          :unknown "⚪ 不明")]
+            (println (format "%-50s %8d %8s %s"
+                             (:target r)
+                             (:disabled r)
+                             pct-str
+                             pri-str)))))
+      rows)))
+
 ;; -------------------------
 ;; query
 ;; -------------------------
