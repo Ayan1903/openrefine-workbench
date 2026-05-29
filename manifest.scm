@@ -5,7 +5,7 @@
 
 (specifications->manifest
  '(;; Clojure + Java environment for XTDB v2
-   "openjdk@21"              ; Java 21 LTS
+   "openjdk@21:jdk"          ; Java 21 LTS (with javac)
    "clojure-tools"           ; Clojure CLI for REPL and deps.edn
    "rlwrap"                  ; Readline wrapper for REPL
 

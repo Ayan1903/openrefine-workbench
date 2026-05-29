@@ -41,6 +41,11 @@
   (let [n (core/jacoco! (get-in phase-spec [:params :jacoco-xml]) :trial (:trial/id trial))]
     (println (str "  jacocos: " n))))
 
+(defmethod run-phase! :ingest/jref-gen-tests [trial phase-spec]
+  (let [{:keys [java-root]} (:params phase-spec)
+        n (core/jref! [java-root] :trial (:trial/id trial) :tag "gen-tests")]
+    (println (str "  gen-test refs: " n))))
+
 ;; -------------------------
 ;; analyze フェーズ
 ;; -------------------------
@@ -94,6 +99,66 @@
         skipped (filter #(= :skipped (:status %)) results)]
     (println (str "  統合完了: merged=" (count merged) " skipped=" (count skipped)))))
 
+(defmethod run-phase! :analyze/gen-tests [trial phase-spec]
+  (let [trial-id (:trial/id trial)
+    params   (:params phase-spec)
+    gen-tests-dir (:gen-tests-dir params)
+    src-roots (:input/java-roots trial)
+    result   (core/ingest-analyze-gen-tests! gen-tests-dir :trial trial-id :src-roots src-roots)]
+    (println (str "  分析完了: " (:analyzed result) " テスト"))
+    (let [summary (core/gen-tests-summary :trial trial-id)
+          ranks [:A :B :C :D]
+          all-results (core/gen-tests :trial trial-id)
+          compiles-count (count (filter :gta/compiles? all-results))
+          compiles-pct (if (seq all-results)
+                         (double (* 100 (/ compiles-count (count all-results))))
+                         0.0)]
+      (doseq [r ranks]
+        (println (format "    [%s] %2d テスト" r (get summary r 0))))
+      (let [avg-loc (if (seq all-results)
+                      (double (/ (reduce + 0 (map :gta/loc all-results)) (count all-results)))
+                      0.0)
+            avg-assertions (if (seq all-results)
+                             (double (/ (reduce + 0 (map :gta/assertions all-results)) (count all-results)))
+                             0.0)]
+        (println (format "    平均 LOC: %.1f, 平均 Assertion: %.1f" avg-loc avg-assertions))
+        (println (format "    コンパイル可能: %d / %d (%.1f%%)" compiles-count (count all-results) compiles-pct))))))
+
+(defmethod run-phase! :query/gen-tests-a-rank [trial _]
+  (let [trial-id (:trial/id trial)]
+    (println "  gen-tests A ランク確認...")
+    (let [results (core/gen-tests :trial trial-id :rank :A)]
+      (if (empty? results)
+        (println "    A ランク: なし")
+        (doseq [r results]
+          (println (format "    A: %s (%.1f%%)" (:gta/class-name r) (:gta/coverage r))))))))
+
+(defmethod run-phase! :regenerate/b-rank-tests [trial phase-spec]
+  (let [trial-id (:trial/id trial)
+        params   (:params phase-spec)
+        rank     (:rank params)
+        results  (core/gen-tests :trial trial-id :rank rank)]
+    (println (str "  " rank " ランク対象: " (count results) " テスト"))
+    (doseq [r (sort-by :gta/class-name results)]
+      (println (format "    %-50s | LOC:%3d | Assert:%2d | Compiles:%s"
+                       (:gta/class-name r)
+                       (:gta/loc r)
+                       (:gta/assertions r)
+                       (if (:gta/compiles? r) "✓" "✗"))))))
+
+(defmethod run-phase! :regenerate/c-rank-tests [trial phase-spec]
+  (let [trial-id (:trial/id trial)
+        params   (:params phase-spec)
+        rank     (:rank params)
+        results  (core/gen-tests :trial trial-id :rank rank)]
+    (println (str "  " rank " ランク対象: " (count results) " テスト"))
+    (doseq [r (sort-by :gta/class-name results)]
+      (println (format "    %-50s | LOC:%3d | Assert:%2d | Compiles:%s"
+                       (:gta/class-name r)
+                       (:gta/loc r)
+                       (:gta/assertions r)
+                       (if (:gta/compiles? r) "✓" "✗"))))))
+
 (defmethod run-phase! :default [_ phase-spec]
   (throw (ex-info (str "Unknown phase: " (:phase phase-spec))
                   {:phase-spec phase-spec})))
@@ -104,9 +169,9 @@
 
 (defn- track-phase?
   "ingest/* と generate/* の完了状態を XTDB に記録する。
-   analyze/* は常に再実行（クエリ結果は変わりうるため）。"
+   analyze/* と query/* は常に再実行（クエリ結果は変わりうるため）。"
   [phase]
-  (not= "analyze" (namespace phase)))
+  (not (#{:analyze :query} (keyword (namespace phase)))))
 
 (defn execute-pipeline! [trial]
   (let [trial-id (:trial/id trial)

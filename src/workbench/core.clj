@@ -2517,3 +2517,94 @@
         (catch Exception e
           (println (str "ERROR [" cls "]: " (.getMessage e))))))))
 
+;; =========================================================
+
+(defn gen-tests
+  "生成されたテストコードのランク情報をクエリする。
+
+   opts:
+     :trial - トライアル ID（必須）
+     :rank - ランク条件（:A :B :C :D または [:A :B] など、nil で全件）
+     :min-coverage - 最小カバレッジ %（nil で制限なし）
+
+   例:
+     (gen-tests :trial \"tradehub\")                  ; 全件
+     (gen-tests :trial \"tradehub\" :rank :A)        ; A ランクのみ
+     (gen-tests :trial \"tradehub\" :rank [:A :B])   ; A または B
+     (gen-tests :trial \"tradehub\" :min-coverage 50); 50% 以上"
+  [& {:keys [trial rank min-coverage]}]
+  (let [n (node)
+        results (xt/q n
+                      '(from :gen-tests [{:xt/id id
+                                          :gta/trial t
+                                          :gta/class-name cn
+                                          :gta/rank r
+                                          :gta/loc l
+                                          :gta/assertions a
+                                          :gta/method-calls mc
+                                          :gta/compiles? comp
+                                          :gta/coverage c}]))]
+    (->> results
+         (map (fn [{:keys [t cn r l a mc comp c]}]
+                {:gta/trial t
+                 :gta/class-name cn
+                 :gta/rank r
+                 :gta/loc l
+                 :gta/assertions a
+                 :gta/method-calls mc
+                 :gta/compiles? comp
+                 :gta/coverage c}))
+         (filter (fn [doc]
+                   (and (= trial (:gta/trial doc))
+                        (or (nil? rank)
+                            (if (coll? rank)
+                              (some #{(:gta/rank doc)} rank)
+                              (= (:gta/rank doc) rank)))
+                        (or (nil? min-coverage)
+                            (>= (:gta/coverage doc) min-coverage))))))))
+
+(defn gen-tests-by-rank
+  "ランク別にテストをグループ化してサマリーを返す。
+
+   例:
+     (gen-tests-by-rank :trial \"tradehub\")
+     => {:A [{:class \"ActivityRecord\" :coverage 95.2} ...]
+         :B [...]
+         :C [...]
+         :D [...]}"
+  [& {:keys [trial]}]
+  (let [results (gen-tests :trial trial)]
+    (group-by :gta/rank results)))
+
+(defn gen-tests-summary
+  "ランク別統計を返す。
+
+   例:
+     (gen-tests-summary :trial \"tradehub\")
+     => {:total 83 :A 5 :B 12 :C 23 :D 43 :avg-coverage 42.5}"
+  [& {:keys [trial]}]
+  (let [results (gen-tests :trial trial)
+        by-rank (group-by :gta/rank results)
+        counts (into {} (map (fn [[k v]] [k (count v)]) by-rank))
+        avg-cov (if (seq results)
+                  (/ (reduce + 0 (map :gta/coverage results)) (count results))
+                  0.0)]
+    (assoc counts
+           :total (count results)
+           :avg-coverage (double (/ (Math/round (* avg-cov 10)) 10)))))
+
+(defn ingest-analyze-gen-tests!
+  "gen-tests ディレクトリを分析して XTDB :gen-tests テーブルに記録する。
+   runner.clj の :analyze/gen-tests フェーズから呼ばれる。
+
+   gen-tests-dir: gen-tests ディレクトリのパス
+   opts:
+     :trial - トライアル ID
+
+   返値:
+     {:analyzed N :deleted M :results [...]}
+
+   例:
+     (ingest-analyze-gen-tests! \"trials/experiments/.../exports/gen-tests\" :trial \"tradehub\")"
+  [gen-tests-dir & {:keys [trial src-roots]}]
+  (ingest/analyze-gen-tests-dir! (node) :gen-tests-dir gen-tests-dir :trial trial :src-roots src-roots))

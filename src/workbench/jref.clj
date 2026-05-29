@@ -116,7 +116,7 @@
 (defn- call->doc
   "MethodCallExpr 1 件を :refs ドキュメントに変換する。
    scope が解決できた場合は :ref/to を ClassName/methodName 形式で記録する。"
-  [^MethodCallExpr expr rel-path trial field-map iface-impl-map]
+  [^MethodCallExpr expr rel-path trial field-map iface-impl-map & {:keys [tag]}]
   (let [from      (from-sym expr)
         from-cls  (let [idx (.indexOf ^String from "/")]
                     (if (>= idx 0) (subs from 0 idx) from))
@@ -133,16 +133,18 @@
         pos       (opt->val (.getBegin expr))
         line      (some-> pos .-line)
         col       (some-> pos .-column)
-        id-prefix (if trial (str trial "::") "")]
-    {:xt/id     (str id-prefix from "->" to)
-     :ref/trial trial
-     :ref/kind  ":call"
-     :ref/from  from
-     :ref/to    to
-     :ref/file  rel-path
-     :ref/line  line
-     :ref/col   col
-     :ref/arity (.size (.getArguments expr))}))
+        id-prefix (if trial (str trial "::") "")
+        doc       {:xt/id     (str id-prefix from "->" to)
+                   :ref/trial trial
+                   :ref/kind  ":call"
+                   :ref/from  from
+                   :ref/to    to
+                   :ref/file  rel-path
+                   :ref/line  line
+                   :ref/col   col
+                   :ref/arity (.size (.getArguments expr))}]
+    (cond-> doc
+      tag (assoc :ref/tag tag))))
 
 ;; -------------------------
 ;; file-level parsing
@@ -158,28 +160,28 @@
 (defn- new->doc
   "ObjectCreationExpr 1 件を :refs ドキュメントに変換する。
    :ref/to は ClassName/<init> 形式で記録する。"
-  [^ObjectCreationExpr expr rel-path trial]
+  [^ObjectCreationExpr expr rel-path trial & {:keys [tag]}]
   (let [from      (from-sym expr)
         cls-name  (.getNameAsString (.getType expr))
         to        (str cls-name "/<init>")
         pos       (opt->val (.getBegin expr))
         line      (some-> pos .-line)
         col       (some-> pos .-column)
-        id-prefix (if trial (str trial "::") "")]
-    {:xt/id     (str id-prefix from "->" to)
-     :ref/trial trial
-     :ref/kind  ":new"
-     :ref/from  from
-     :ref/to    to
-     :ref/file  rel-path
-     :ref/line  line
-     :ref/col   col
-     :ref/arity (.size (.getArguments expr))}))
-
+        id-prefix (if trial (str trial "::") "")
+        doc       {:xt/id     (str id-prefix from "->" to)
+                   :ref/trial trial
+                   :ref/kind  ":new"
+                   :ref/from  from
+                   :ref/to    to
+                   :ref/file  rel-path
+                   :ref/line  line
+                   :ref/col   col}]
+    (cond-> doc
+      tag (assoc :ref/tag tag))))
 (defn- parse-file
   "1 つの .java ファイルを解析し、call-doc のシーケンスを返す。
    パースエラーは警告を出してスキップする。"
-  [root ^java.io.File f trial field-map iface-impl-map]
+  [root ^java.io.File f trial field-map iface-impl-map & {:keys [tag]}]
   (let [abs      (.getAbsolutePath f)
         root-abs (.getAbsolutePath (io/file root))
         rel      (subs abs (inc (count root-abs)))]
@@ -188,8 +190,8 @@
             calls  (.findAll parsed MethodCallExpr)
             news   (.findAll parsed ObjectCreationExpr)]
         (concat
-          (map #(call->doc % rel trial field-map iface-impl-map) calls)
-          (map #(new->doc % rel trial) news)))
+          (map #(call->doc % rel trial field-map iface-impl-map :tag tag) calls)
+          (map #(new->doc % rel trial :tag tag) news)))
       (catch Exception e
         (binding [*out* *err*]
           (println (str "[jref] parse error: " rel " — " (.getMessage e))))
@@ -207,11 +209,13 @@
    paths: 解析対象パスのベクタ（例: [\"trials/samples/repo\"]）
    opts:
      :trial - トライアル識別子（文字列）。省略可。
+     :tag   - 参照の分類タグ（例: \"gen-tests\"）。省略可。
 
    例:
      (jref! node [\"trials/samples/repo\"])
-     (jref! node [\"src/main/java\"] :trial \"aca-spring\")"
-  [node paths & {:keys [trial]}]
+     (jref! node [\"src/main/java\"] :trial \"aca-spring\")
+     (jref! node [\"exports/gen-tests\"] :trial \"trial-1\" :tag \"gen-tests\")"
+  [node paths & {:keys [trial tag]}]
   (println "[jref] building scope-resolution maps...")
   (let [iface-impl-map (build-iface-impl-map paths)
         field-map      (build-field-map paths)
@@ -219,7 +223,7 @@
                                     " entries, field-map: " (count field-map) " classes"))
         docs    (->> paths
                      (mapcat (fn [root]
-                               (mapcat #(parse-file root % trial field-map iface-impl-map)
+                               (mapcat #(parse-file root % trial field-map iface-impl-map :tag tag)
                                        (java-files root))))
                      vec)
         new-ids (set (map :xt/id docs))
