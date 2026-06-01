@@ -526,6 +526,29 @@ JaCoCo XML レポートを解析して XTDB に取り込み、「テストが届
  ...]
 ```
 
+### `run-trial` の `:ingest/jacoco` フェーズ
+
+`trial.edn` から実行する場合は、`phase-spec` の `:params` に次を指定します。
+
+| パラメータ | 説明 |
+|---|---|
+| `:jacoco-xml` | 既存の JaCoCo XML ファイルパス。存在すればそのまま取り込む |
+| `:module-dir` | Maven モジュールディレクトリ。指定時は Maven 実行で `target/site/jacoco/jacoco.xml` を生成して取り込む |
+
+`module-dir` 指定時の実行コマンド（要旨）:
+
+```bash
+./mvnw -pl <module> -am \
+       test org.jacoco:jacoco-maven-plugin:report \
+       -Dmaven.test.failure.ignore=true -DfailIfNoTests=false
+```
+
+挙動のポイント:
+
+- テスト失敗があっても、`jacoco.xml` が生成されれば取り込みを続行する
+- `jacoco.xml` が生成されなかった場合は `:ingest/jacoco` フェーズを失敗として記録する
+- `jacoco.exec` が残っていれば、後から `jacoco:report` 実行で `jacoco.xml` を再生成可能
+
 ---
 
 ## AI テスト生成 API（codegen）

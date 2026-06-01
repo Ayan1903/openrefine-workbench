@@ -145,6 +145,23 @@ guix shell -m manifest.scm -- clojure -A:xtdb -M test/smoke_test.clj trials/samp
 ./bin/run-trial trials/samples/test-csv-import/trial.edn
 ```
 
+### JaCoCo 取り込み（`:ingest/jacoco`）の実行ルール
+
+`run-trial` の `:xtdb-workbench` フェーズで `:ingest/jacoco` を使う場合、
+`trial.edn` の `:params` は次のどちらかを指定します。
+
+- `:jacoco-xml` — 既存の `jacoco.xml` をそのまま取り込む
+- `:module-dir` — Maven 実行で `target/site/jacoco/jacoco.xml` を生成して取り込む
+
+`module-dir` 指定時は、内部的に次の流れで実行します。
+
+- `test org.jacoco:jacoco-maven-plugin:report`
+- `-Dmaven.test.failure.ignore=true` を付与（テスト失敗があってもレポート生成を継続しやすくする）
+- 生成後に `target/site/jacoco/jacoco.xml` が存在すれば取り込みを続行
+
+`jacoco.exec` が残っている場合は、後から `jacoco:report` 相当を実行して
+`jacoco.xml` を再生成できます。
+
 ---
 
 ## ドキュメント

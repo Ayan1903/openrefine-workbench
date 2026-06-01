@@ -251,11 +251,13 @@
 
   phase-spec may contain :params with either:
     - :jacoco-xml  : explicit path to jacoco.xml
-    - :module-dir  : maven module directory to run `mvn -q test site`
+    - :module-dir  : maven module directory to run
+                     `mvn test org.jacoco:jacoco-maven-plugin:report`
 
   Behavior:
     1. If :jacoco-xml exists on disk -> parse it.
     2. Else if :module-dir provided -> run mvn and try to produce jacoco.xml.
+       (test failures are tolerated so report generation can continue)
     3. Else if :jacoco-xml provided but missing -> try to find a parent dir
        containing `pom.xml` and run mvn there.
     4. Otherwise return {:error ...}.

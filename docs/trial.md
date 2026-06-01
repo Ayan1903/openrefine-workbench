@@ -37,7 +37,7 @@ trial.edn
     ↓ REPL または analyze.clj
 [ingest phase]
     ↓ jref! / jsig! で Java 呼び出しグラフを XTDB へ投入
-    ↓ jacoco! でカバレッジ情報を投入（任意）
+  ↓ :ingest/jacoco（jacoco-xml 既存取り込み or module-dir から生成して取り込み）
     ↓
 [analyze phase]
     ↓ query / hotspots / uncovered-sql-methods 等で分析
