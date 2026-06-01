@@ -38,8 +38,12 @@
     (println (str "  sql-refs: " n))))
 
 (defmethod run-phase! :ingest/jacoco [trial phase-spec]
-  (let [n (core/jacoco! (get-in phase-spec [:params :jacoco-xml]) :trial (:trial/id trial))]
-    (println (str "  jacocos: " n))))
+  (let [trial-id (:trial/id trial)
+        res (core/ingest-jacoco! phase-spec :trial trial-id)]
+    (if (:error res)
+      (throw (ex-info (str "jacoco ingest failed: " (:error res))
+                      {:phase :ingest/jacoco :trial trial-id :res res}))
+      (println (str "  jacocos: " res)))))
 
 
 ;; AI生成テストのjavacチェック（compile-errors-dir!）

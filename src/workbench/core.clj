@@ -244,6 +244,98 @@
   [xml-path & {:keys [trial]}]
   (jacoco/jacoco! (node) xml-path :trial trial))
 
+;; enhanced ingest-jacoco!: if a provided jacoco.xml path is missing,
+;; try to locate a Maven module (pom.xml) by walking parent dirs and run mvn there.
+(defn ingest-jacoco!
+  "Ingest JaCoCo XML for a phase-spec.
+
+  phase-spec may contain :params with either:
+    - :jacoco-xml  : explicit path to jacoco.xml
+    - :module-dir  : maven module directory to run `mvn -q test site`
+
+  Behavior:
+    1. If :jacoco-xml exists on disk -> parse it.
+    2. Else if :module-dir provided -> run mvn and try to produce jacoco.xml.
+    3. Else if :jacoco-xml provided but missing -> try to find a parent dir
+       containing `pom.xml` and run mvn there.
+    4. Otherwise return {:error ...}.
+
+  Returns the result of `jacoco!` on success or a map with :error on failure." 
+  [phase-spec & {:keys [trial]}]
+  (let [params    (or (:params phase-spec) {})
+        jacoco-xml (get params :jacoco-xml)
+        module-dir (get params :module-dir)
+        xml-file   (when jacoco-xml (io/file jacoco-xml))
+
+        ;; helper: run mvnw (via guix shell) if available, otherwise fallback to system mvn
+        ;; Note: we allow test failures so jacoco report can still be produced.
+        run-mvn-and-find
+        (fn [dir]
+          (let [dfile (io/file dir)]
+            (if (and (.exists dfile) (.isDirectory dfile))
+              (let [find-mvn-root
+                    (fn [start]
+                      (loop [d (io/file start)]
+                        (when d
+                          (let [mvnw (io/file d "mvnw")
+                                mvn-dir (io/file d ".mvn")]
+                            (cond
+                              (.exists mvnw) d
+                              (.exists mvn-dir) d
+                              :else (recur (.getParentFile d)))))))
+                      mvn-root (find-mvn-root dfile)
+                      module-path (when mvn-root
+                                    (-> (.toPath (io/file (.getAbsolutePath mvn-root)))
+                                        (.relativize (.toPath (io/file (.getAbsolutePath dfile))))
+                                        str))
+                      module-arg (when (and module-path (not= module-path ""))
+                                   (str " -pl " module-path " -am"))
+                      res (if mvn-root
+                        (sh "sh" "-c"
+                        (str "cd " (.getAbsolutePath mvn-root)
+                             " && MAVEN_OPTS='--add-opens java.base/java.lang=ALL-UNNAMED' guix shell 'openjdk@21:jdk' maven -- ./mvnw"
+                             (or module-arg "")
+                                " test org.jacoco:jacoco-maven-plugin:report -Dmaven.test.failure.ignore=true -DfailIfNoTests=false 2>&1"))
+                              (sh "bash" "-lc" (str "cd " (-> dfile .getAbsolutePath) " && mvn test org.jacoco:jacoco-maven-plugin:report -Dmaven.test.failure.ignore=true -DfailIfNoTests=false 2>&1")))
+                    out (or (:out res) (:err res) "")
+                    exit (or (:exit res) 1)]
+                (let [p (io/file dfile "target/site/jacoco/jacoco.xml")]
+                  (cond
+                    (.exists p)
+                    (jacoco! (.getAbsolutePath p) :trial trial)
+
+                    (zero? exit)
+                    {:error (str "jacoco xml not found after mvn: " (.getAbsolutePath p))}
+
+                    :else
+                    {:error (str "mvn failed and jacoco xml missing: " out)})))
+              {:error (str "module-dir not found: " (.getAbsolutePath dfile))})))
+
+        ;; helper: walk parents from a starting path to find a dir containing pom.xml
+        find-parent-with-pom
+        (fn [start]
+          (loop [d (.getParentFile (io/file start))]
+            (when d
+              (let [pom (io/file d "pom.xml")]
+                (if (.exists pom)
+                  d
+                  (recur (.getParentFile d)))))))]
+
+    (cond
+      (and xml-file (.exists xml-file))
+      (jacoco! (.getAbsolutePath xml-file) :trial trial)
+
+      module-dir
+      (run-mvn-and-find module-dir)
+
+      (and jacoco-xml (not (.exists (io/file jacoco-xml))))
+      (if-let [inferred-dir (find-parent-with-pom jacoco-xml)]
+        (run-mvn-and-find inferred-dir)
+        {:error (str "jacoco.xml missing and no parent pom.xml found for: " jacoco-xml)})
+
+      :else
+      {:error "no jacoco-xml or module-dir provided"})))
+
 (defn jacocos
   "XTDB :jacoco テーブルから全レコードを返す。
    opts:
