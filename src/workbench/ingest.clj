@@ -306,7 +306,14 @@
           assertions (count-assertions source)
           method-calls (count-method-calls source)
           loc-norm (normalized-loc loc src-loc)
-          compiles? (can-compile? source)
+          ;; XTDB :java-compile-errors テーブルから既に格納されたコンパイルエラー情報を参照
+          compile-errors-doc (->> (xt/q node '(from :java-compile-errors [{:xt/id id
+                                                                             :java/compile-errors errs
+                                                                             :file/path fpath}]))
+                                  (filter #(= (:fpath %) test-file-path))
+                                  first)
+          compile-errors (or (:errs compile-errors-doc) [])
+          compiles? (empty? compile-errors)
           
           ;; ランク判定（品質スコアベース）
           ;; コンパイル不可 → 自動 D ランク
