@@ -78,20 +78,89 @@
 ;; Java compile error check (re-export)
 ;; -------------------------
 
+;; Maven test classpath 生成 (guix shell 経由で mvnw を実行)
+(defn- generate-combined-classpath
+  "main + test-scope classpath を生成。
+   argument: maven-root = pom.xml が存在するディレクトリ
+   returns: 'main:test:target/classes' 形式の combined classpath, または失敗時は nil
+   
+   実装の背景:
+   - exports/gen-tests/ 配下のテストを javac で直接コンパイルする場合、
+     main classpath (compile scope) + test-scope classpath が必要。
+   - -DincludeScope=test は正しく機能し、test-scope jar も生成されるが、
+     main classpath と分離して生成し、両方を結合する。"
+  [^String maven-root]
+  (try
+    (println (str "    [debug] generate-combined-classpath called with: " maven-root))
+    (let [pom-path (str maven-root "/pom.xml")
+          pom-file (java.io.File. pom-path)
+          main-cp-file "/tmp/mvnw-main-cp.txt"
+          test-cp-file "/tmp/mvnw-test-cp.txt"
+          ;; maven-root の絶対パスを取得
+          abs-maven-root (.getAbsolutePath (java.io.File. maven-root))]
+      (if (.exists pom-file)
+        (do
+          (println (str "    [debug] pom.xml exists, generating main + test classpath..."))
+          ;; main classpath を生成 (default: compile scope)
+          ;; guix shell には relative manifest.scm を指定（Clojure は常にプロジェクトルートから実行）
+          ;; -pl common-lib を指定してモジュール固有の依存関係を取得
+          (let [main-result (sh "guix" "shell" "-m" "manifest.scm" "--"
+                                "sh" "-c"
+                                (str "cd " abs-maven-root " && ./mvnw -q dependency:build-classpath -pl common-lib -Dmdep.outputFile=" main-cp-file))
+                main-exit (:exit main-result)
+                ;; test-scope classpath を生成
+                test-result (sh "guix" "shell" "-m" "manifest.scm" "--"
+                               "sh" "-c"
+                               (str "cd " abs-maven-root " && ./mvnw -q dependency:build-classpath -pl common-lib -DincludeScope=test -Dmdep.outputFile=" test-cp-file))
+                test-exit (:exit test-result)]
+            (if (and (zero? main-exit) (zero? test-exit))
+              (let [main-cp-obj (java.io.File. main-cp-file)
+                    test-cp-obj (java.io.File. test-cp-file)]
+                (if (and (.exists main-cp-obj) (.exists test-cp-obj))
+                  (let [main-cp (str/trim (slurp main-cp-file))
+                        test-cp (str/trim (slurp test-cp-file))
+                        ;; main + test + common-lib/target/classes (絶対パス) を結合
+                        ;; common-lib/target/classes にはコンパイル済みのプロジェクトクラスが含まれる
+                        classes-dir (str abs-maven-root "/common-lib/target/classes")
+                        combined-cp (str main-cp ":" test-cp ":" classes-dir)]
+                    (println (str "    [debug] combined classpath generated, length: " (count combined-cp)))
+                    (println (str "    [debug] classes-dir: " classes-dir))
+                    combined-cp)
+                  (do
+                    (println (str "  [warning] classpath files not created"))
+                    nil)))
+              (do
+                (println (str "  [warning] classpath generation failed, main-exit=" main-exit " test-exit=" test-exit))
+                (println (str "    [debug] main-err: " (:err main-result)))
+                (println (str "    [debug] test-err: " (:err test-result)))
+                nil))))
+        (do
+          (println (str "  [warning] pom.xml not found at " pom-path))
+          nil)))
+    (catch Exception e
+      (do
+        (println (str "  [warning] classpath generation exception: " (.getMessage e)))
+        nil))))
+
 (defn compile-errors-dir!
   "指定ディレクトリ以下の全JavaファイルをDiagnosticCollectorでチェックし、
-    エラー情報をXTDBに格納する。"
-  [root]
-  (ingest/compile-errors-dir! (node) root))
+    エラー情報をXTDBに格納する。
+    オプション :maven-root を指定すると、そこから combined classpath (main + test-scope) を自動生成する。"
+  [root & {:keys [maven-root]}]
+  (let [cp (when maven-root
+             (generate-combined-classpath maven-root))]
+    (if cp
+      (ingest/compile-errors-dir! (node) root :classpath cp)
+      (ingest/compile-errors-dir! (node) root))))
 
 ;; compile-ok-java-files: compile-errors-dir! でエラーが空のファイルのみ返す
 (defn compile-ok-java-files
   "指定ディレクトリ以下の全Javaファイルのうち、コンパイルエラーがないファイルパスのベクタを返す。"
-  [root]
-  (let [errs (ingest/compile-errors-dir! (node) root)]
+  [root & {:keys [maven-root]}]
+  (let [errs (compile-errors-dir! root :maven-root maven-root)]
     (->> errs
-         (filter #(empty? (:errors %)))
-         (mapv :file))))
+         (filter #(empty? (:java/compile-errors %)))
+         (mapv :file/path))))
 
 ;; -------------------------
 ;; ingest
@@ -1346,6 +1415,9 @@
              "## SQL 縛り（MyBatis Mapper 経由）\n" sql-txt "\n\n"
              "## JaCoCo カバレッジ（covered=0 = 完全未テスト）\n" cov-txt "\n\n"
              "## 要件\n"
+             "**重要**: 出力は必ず以下の形式で返すこと：\n"
+             "​```java\n[ここにコードを入れる]\n​```\n"
+             "バックティックの外に説明や他のテキストを入れてはいけない。コードはバックティック内のみ。\n\n"
              "- package 宣言を必ず先頭に含める\n"
              (if existing-tests-txt
                (str "- 「## 既存テストクラス」に記載のテストクラスにメソッドを追記する形で出力する\n"
@@ -1370,12 +1442,20 @@
              "- 依存クラスの呼び出しは「## 依存クラスのメソッドシグネチャ」の引数型・数・throws を厳守すること\n"
              "- enum の値は「## enum定数」に記載のもののみ使うこと（記載外の定数名は存在しない）\n"
              "- 日本語コメントでテストの意図を説明する")]
-    (codegen/chat-complete
-     [{:role "system"
-       :content "あなたは Java の JUnit 5 + Mockito テストコードを生成する専門家です。与えられた静的解析情報を元に、実用的なテストコードを生成してください。"}
-      {:role "user"
-       :content prompt}]
-     :model (or model "openai/gpt-4.1"))))
+    ;; GitHub Models API から Markdown フォーマットのレスポンスを受け取り、
+    ;; ```java ... ``` ブロックを抽出する
+    (let [raw-response
+          (codegen/chat-complete
+           [{:role "system"
+             :content "あなたは Java の JUnit 5 + Mockito テストコードを生成する専門家です。与えられた静的解析情報を元に、実用的なテストコードを生成してください。"}
+            {:role "user"
+             :content prompt}]
+           :model (or model "openai/gpt-4.1"))]
+      ;; ```java ブロックを抽出。複数ブロックがある場合は最初の1つを使う
+      (if-let [match (re-find #"```java\s*([\s\S]*?)\s*```" raw-response)]
+        (nth match 1)
+        ;; バックティック無しで返される場合（稀）
+        raw-response))))
 
 ;; -------------------------
 ;; テスト修正支援（fix-test）

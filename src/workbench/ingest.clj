@@ -17,12 +17,23 @@
 (defn compile-errors-dir!
   "指定ディレクトリ以下の全JavaファイルをDiagnosticCollectorでチェックし、
   エラー情報をXTDBに格納するPoC関数。
-  node: XTDBノード, root: ルートディレクトリパス"
-  [node root]
+  node: XTDBノード, root: ルートディレクトリパス, classpath: オプション（コロン区切り）"
+  [node root & {:keys [classpath]}]
   (let [root-file (io/file root)
         java-files (->> (file-seq root-file)
-                        (filter #(and (.isFile ^java.io.File %) (str/ends-with? (.getName %) ".java"))))]
-    (mapv #(javac/compile-errors-to-xtdb! node (.getAbsolutePath ^java.io.File %)) java-files)))
+                        (filter #(and (.isFile ^java.io.File %) (str/ends-with? (.getName %) ".java"))))
+        results (mapv #(if classpath
+                         (javac/compile-errors-to-xtdb! node (.getAbsolutePath ^java.io.File %) :classpath classpath)
+                         (javac/compile-errors-to-xtdb! node (.getAbsolutePath ^java.io.File %)))
+                      java-files)
+        files-with-errors (filter #(not (empty? (:java/compile-errors %))) results)
+        error-count (reduce + 0 (map #(count (:java/compile-errors %)) files-with-errors))]
+    ;; 集計結果を出力
+    (when (seq results)
+      (println (str "  compile errors checked: " (count results) " files"))
+      (println (str "  files with errors: " (count files-with-errors) " / " (count results)))
+      (println (str "  total error count: " error-count)))
+    results))
 
 ;; -------------------------
 ;; helpers
@@ -306,11 +317,13 @@
           assertions (count-assertions source)
           method-calls (count-method-calls source)
           loc-norm (normalized-loc loc src-loc)
+          ;; 絶対パスを取得（compile-errors-dir! で格納されるパスと一致させる）
+          abs-test-file-path (.getAbsolutePath (io/file test-file-path))
           ;; XTDB :java-compile-errors テーブルから既に格納されたコンパイルエラー情報を参照
           compile-errors-doc (->> (xt/q node '(from :java-compile-errors [{:xt/id id
                                                                              :java/compile-errors errs
                                                                              :file/path fpath}]))
-                                  (filter #(= (:fpath %) test-file-path))
+                                  (filter #(= (:fpath %) abs-test-file-path))
                                   first)
           compile-errors (or (:errs compile-errors-doc) [])
           compiles? (empty? compile-errors)
@@ -372,11 +385,12 @@
 ;;   :gen-tests-dir - gen-tests ディレクトリのパス
 ;;   :trial - トライアル ID
 ;;   :src-roots - プロダクションソースのルートディレクトリ群
+;;   :test-classpath - gen-tests コンパイル用の classpath（オプション）
 ;;
 ;; 例:
-;;   (analyze-gen-tests-dir! node :gen-tests-dir "trials/experiments/2026-04-28-tradehub/exports/gen-tests" :trial "tradehub" :src-roots ["src/main/java"])
+;;   (analyze-gen-tests-dir! node :gen-tests-dir "trials/experiments/2026-04-28-tradehub/exports/gen-tests" :trial "tradehub" :src-roots ["src/main/java"] :test-classpath "...")
 (defn analyze-gen-tests-dir!
-  [node & {:keys [gen-tests-dir trial src-roots]}]
+  [node & {:keys [gen-tests-dir trial src-roots test-classpath]}]
   (let [effective-src-roots (if (seq src-roots)
                               src-roots
                               (infer-src-roots-from-gen-tests-dir gen-tests-dir))
@@ -402,7 +416,8 @@
 
         docs (mapv (fn [class-dir]
                     (let [test-java-path (str gen-tests-dir "/" class-dir "/" class-dir "Test.java")
-                          test-file (io/file test-java-path)]
+                          test-file (io/file test-java-path)
+                          abs-test-java-path (.getAbsolutePath test-file)]
                       (if (.exists test-file)
                         (let [src-file (find-src-file class-dir)
                               _ (when (= class-dir "ActivityRecordServiceImpl")
@@ -414,7 +429,7 @@
                                           (catch Exception _ 0)))
                               _ (when (= class-dir "ActivityRecordServiceImpl")
                                   (println (str "    [debug] ActivityRecordServiceImpl src-loc: " src-loc)))
-                              analysis (analyze-gen-test node test-java-path trial
+                              analysis (analyze-gen-test node abs-test-java-path trial
                                                          :class-name class-dir
                                                          :src-loc src-loc)
                               _ (when (= class-dir "ActivityRecordServiceImpl")

@@ -8,6 +8,7 @@
    完了済みフェーズは XTDB に記録されてスキップされる。
    再実行: (core/reset-phase! \"trial-id\" :ingest/jref)"
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [workbench.core :as core]))
 
 ;; -------------------------
@@ -48,14 +49,16 @@
 
 ;; AI生成テストのjavacチェック（compile-errors-dir!）
 (defmethod run-phase! :ingest/compile-errors-gen-tests [trial phase-spec]
-  (let [{:keys [java-root]} (:params phase-spec)
-        n (core/compile-errors-dir! java-root)]
+  (let [{:keys [java-root maven-root]} (:params phase-spec)
+        _ (println (str "  [debug] java-root: " java-root))
+        _ (println (str "  [debug] maven-root: " maven-root))
+        n (core/compile-errors-dir! java-root :maven-root maven-root)]
     (println (str "  compile errors checked: " (count n) " files"))))
 
 ;; コンパイルOKなファイルだけref投入
 (defmethod run-phase! :ingest/jref-gen-tests [trial phase-spec]
-  (let [{:keys [java-root]} (:params phase-spec)
-        ok-files (->> (core/compile-ok-java-files java-root)
+  (let [{:keys [java-root maven-root]} (:params phase-spec)
+        ok-files (->> (core/compile-ok-java-files java-root :maven-root maven-root)
                       (remove nil?))
         n (if (seq ok-files)
             (core/jref! ok-files :trial (:trial/id trial) :tag "gen-tests")
@@ -151,12 +154,20 @@
 
 (defmethod run-phase! :query/gen-tests-a-rank [trial _]
   (let [trial-id (:trial/id trial)]
-    (println "  gen-tests A ランク確認...")
+    (println "  :A ランク対象確認...")
     (let [results (core/gen-tests :trial trial-id :rank :A)]
       (if (empty? results)
         (println "    A ランク: なし")
-        (doseq [r results]
-          (println (format "    A: %s (%.1f%%)" (:gta/class-name r) (:gta/coverage r))))))))
+        (doseq [r (sort-by :gta/class-name results)]
+          (println (format "    %-50s | LOC:%3d | Src:%4s | Norm:%7.2f | Assert:%2d | Compiles:%s"
+                           (:gta/class-name r)
+                           (:gta/loc r)
+                           (if-let [src-loc (:gta/src-loc r)]
+                             (str src-loc)
+                             "-")
+                           (double (or (:gta/loc-norm r) 0.0))
+                           (:gta/assertions r)
+                           (if (:gta/compiles? r) "✓" "✗"))))))))
 
 (defmethod run-phase! :regenerate/b-rank-tests [trial phase-spec]
   (let [trial-id (:trial/id trial)
@@ -191,6 +202,39 @@
                        (double (or (:gta/loc-norm r) 0.0))
                        (:gta/assertions r)
                        (if (:gta/compiles? r) "✓" "✗"))))))
+
+(defmethod run-phase! :regenerate/d-rank-tests [trial phase-spec]
+  (let [trial-id (:trial/id trial)
+        results  (core/gen-tests :trial trial-id :rank :D)
+        ;; XTDB からコンパイルエラー情報を取得するヘルパー
+        ;; NOTE 以外をカウントし、:kind の種類を返す
+        get-error-info (fn [class-name]
+                         (let [docs (core/q '(from :java-compile-errors [{:xt/id id :java/compile-errors errs :file/path fpath}]))
+                               matching (filter #(str/includes? (:fpath %) (str class-name "Test.java")) docs)]
+                           (if-let [doc (first matching)]
+                             (let [errs (or (:errs doc) [])
+                                   errors (filter #(not= (str (:kind %)) "NOTE") errs)
+                                   kinds (sort (map str (set (map :kind errors))))]
+                               {:count (count errors)
+                                :kinds (str/join ", " kinds)})
+                             {:count 0 :kinds ""})))]
+    (println (str "  :D ランク対象: " (count results) " テスト"))
+    (if (empty? results)
+      (println "    D ランク: なし")
+      (doseq [r (sort-by :gta/class-name results)]
+        (let [info (get-error-info (:gta/class-name r))
+              kind-str (if (empty? (:kinds info)) "" (str " [" (:kinds info) "]"))]
+          (println (format "    %-50s | LOC:%3d | Src:%4s | Norm:%7.2f | Assert:%2d | Compiles:%s Errors:%d%s"
+                           (:gta/class-name r)
+                           (:gta/loc r)
+                           (if-let [src-loc (:gta/src-loc r)]
+                             (str src-loc)
+                             "-")
+                           (double (or (:gta/loc-norm r) 0.0))
+                           (:gta/assertions r)
+                           (if (:gta/compiles? r) "✓" "✗")
+                           (:count info)
+                           kind-str)))))))
 
 (defmethod run-phase! :default [_ phase-spec]
   (throw (ex-info (str "Unknown phase: " (:phase phase-spec))
