@@ -2,7 +2,7 @@
 
 ## goal
 
-workbench 自身のソース（`src/`）を `xref!` で解析し、呼び出しグラフを確認する。
+workbench 自身を題材に、xref 分析と compile smoke を通じて解析基盤の挙動を確認する。
 
 ## 実行コマンド
 
@@ -33,6 +33,43 @@ guix shell -m manifest.scm -- clojure -M:xtdb trials/samples/self-analysis/compi
 
 - `compile-ok-java-files` は `["SampleOk.java"]` を返す
 - `compile-errors-dir!` は `SampleOk.java` に 0 件、`SampleError.java` に 1 件以上のエラーを返す
+
+### `compile-with-diagnostics` 現行仕様
+
+`src/workbench/javac.clj` の `compile-with-diagnostics` は、現時点では `classpath` なしの単純版を基準とする。
+
+前提:
+
+- 単一の Java ソースファイルを入力に取る
+- 依存クラスや Maven classpath の解決はまだ扱わない
+- `DiagnosticCollector` の結果をそのまま `compile-errors-to-xtdb!` に渡す
+
+このサンプルで固定したい現行仕様:
+
+- `SampleOk.java` は compile OK
+- `SampleError.java` は compile NG
+- `compile-errors-to-xtdb!` は `:java/compile-errors`, `:file/path`, `:java/compile-error?` を持つ doc を返す
+- `compile-ok-java-files` は compile OK なファイルの絶対パスを返す
+
+今後 `:classpath` を追加するときも、この挙動は未指定時に維持する。
+
+## classpath smoke
+
+`:classpath` 指定あり/なしで `compile-ok-java-files` の結果が変わることを確認するための最小サンプル。
+
+- `classpath/dep/Helper.java`: 依存元クラス
+- `classpath/UseHelper.java`: `dep.Helper` を参照するクラス
+
+実行コマンド:
+
+```bash
+guix shell -m manifest.scm -- clojure -M:xtdb trials/samples/self-analysis/classpath_smoke.clj
+```
+
+期待する結果:
+
+- classpath なしでは `["Helper.java"]` だけが compile OK
+- classpath ありでは `["Helper.java" "UseHelper.java"]` が compile OK
 
 ## observation
 

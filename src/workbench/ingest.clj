@@ -17,12 +17,18 @@
 (defn compile-errors-dir!
   "指定ディレクトリ以下の全JavaファイルをDiagnosticCollectorでチェックし、
   エラー情報をXTDBに格納するPoC関数。
-  node: XTDBノード, root: ルートディレクトリパス"
-  [node root]
+  node: XTDBノード, root: ルートディレクトリパス
+
+  opts:
+    :classpath - javac に渡す classpath 文字列。"
+  [node root & {:keys [classpath]}]
   (let [root-file (io/file root)
         java-files (->> (file-seq root-file)
                         (filter #(and (.isFile ^java.io.File %) (str/ends-with? (.getName %) ".java"))))]
-    (mapv #(javac/compile-errors-to-xtdb! node (.getAbsolutePath ^java.io.File %)) java-files)))
+    (mapv #(javac/compile-errors-to-xtdb! node
+                                          (.getAbsolutePath ^java.io.File %)
+                                          :classpath classpath)
+          java-files)))
 
 ;; -------------------------
 ;; helpers

@@ -1,10 +1,12 @@
 
 ;; --------------------------------------------------
-;; DiagnosticCollectorでJavaファイルをコンパイルし、エラー情報をJSON形式で返すPoC
+;; DiagnosticCollectorでJavaファイルをコンパイルし、診断情報を返すPoC
 ;; --------------------------------------------------
 
 (ns workbench.javac
-  "DiagnosticCollectorでJavaファイルをコンパイルし、エラー情報をJSON形式で返すPoC"
+  "DiagnosticCollectorでJavaファイルをコンパイルし、診断情報をマップ列として返すPoC"
+  (:require
+    [xtdb.api])
   (:import
     [javax.tools ToolProvider DiagnosticCollector JavaFileObject SimpleJavaFileObject JavaFileObject$Kind]
     [java.net URI]
@@ -19,12 +21,17 @@
 
 ;; DiagnosticCollectorでコンパイルし、エラー情報をマップで返す
 (defn compile-with-diagnostics
-  "指定JavaファイルをDiagnosticCollector付きでコンパイルし、エラー情報をマップで返す"
-  [^String java-file-path]
+  "指定JavaファイルをDiagnosticCollector付きでコンパイルし、エラー情報をマップで返す。
+
+  opts:
+    :classpath - javac に渡す classpath 文字列。省略時は従来どおり classpath なし。"
+  [^String java-file-path & {:keys [classpath]}]
   (let [compiler (ToolProvider/getSystemJavaCompiler)
         diagnostics (DiagnosticCollector.)
         file-obj (file->javafileobject java-file-path)
-        task (.getTask compiler nil nil diagnostics nil nil [file-obj])]
+        options (cond-> []
+                  classpath (into ["-classpath" classpath]))
+        task (.getTask compiler nil nil diagnostics options nil [file-obj])]
     (.call task)
     (map (fn [diag]
            {:kind (str (.getKind diag))
@@ -37,9 +44,12 @@
 ;; DiagnosticCollectorのエラー情報をXTDBに格納する
 (defn compile-errors-to-xtdb!
   "指定Javaファイルをコンパイルし、エラー情報をXTDBノードに格納する。
-  :node にはxtdbノード、:java-file-path にはファイルパスを指定。"
-  [node java-file-path]
-  (let [errors (compile-with-diagnostics java-file-path)
+  :node にはxtdbノード、:java-file-path にはファイルパスを指定する。
+
+  opts:
+    :classpath - javac に渡す classpath 文字列。"
+  [node java-file-path & {:keys [classpath]}]
+  (let [errors (compile-with-diagnostics java-file-path :classpath classpath)
         doc {:xt/id java-file-path
              :java/compile-errors errors
              :file/path java-file-path

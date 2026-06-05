@@ -80,9 +80,12 @@
 
 (defn compile-errors-dir!
   "指定ディレクトリ以下の全JavaファイルをDiagnosticCollectorでチェックし、
-    エラー情報をXTDBに格納する。"
-  [root]
-  (ingest/compile-errors-dir! (node) root))
+    エラー情報をXTDBに格納する。
+
+   opts:
+     :classpath - javac に渡す classpath 文字列。"
+  [root & {:keys [classpath]}]
+  (ingest/compile-errors-dir! (node) root :classpath classpath))
 
 (defn- compile-error-doc-errors [doc]
   (or (:java/compile-errors doc)
@@ -96,8 +99,8 @@
 ;; compile-ok-java-files: compile-errors-dir! でエラーが空のファイルのみ返す
 (defn compile-ok-java-files
   "指定ディレクトリ以下の全Javaファイルのうち、コンパイルエラーがないファイルパスのベクタを返す。"
-  [root]
-  (let [errs (compile-errors-dir! root)]
+  [root & {:keys [classpath]}]
+  (let [errs (compile-errors-dir! root :classpath classpath)]
     (->> errs
          (filter #(empty? (compile-error-doc-errors %)))
          (mapv compile-error-doc-file))))
