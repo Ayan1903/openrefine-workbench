@@ -8,6 +8,7 @@
    完了済みフェーズは XTDB に記録されてスキップされる。
    再実行: (core/reset-phase! \"trial-id\" :ingest/jref)"
   (:require [clojure.edn :as edn]
+            [clojure.string :as str]
             [workbench.core :as core]))
 
 ;; -------------------------
@@ -19,6 +20,15 @@
    trial    — パース済みの trial.edn マップ
    phase-spec — {:phase :ingest/jref :params {...}} 形式"
   (fn [_trial phase-spec] (:phase phase-spec)))
+
+(defn- resolve-classpath
+  "phase params から classpath 文字列を解決する。
+   :classpath があればそれを優先し、無ければ :classpath-file を読み込む。"
+  [{:keys [classpath classpath-file]}]
+  (cond
+    classpath classpath
+    classpath-file (some-> classpath-file slurp str/trim not-empty)
+    :else nil))
 
 (defmethod run-phase! :ingest/jref [trial _]
   (let [n (core/jref! (:input/java-roots trial) :trial (:trial/id trial))]
@@ -48,13 +58,15 @@
 
 ;; AI生成テストのjavacチェック（compile-errors-dir!）
 (defmethod run-phase! :ingest/compile-errors-gen-tests [trial phase-spec]
-  (let [{:keys [java-root classpath]} (:params phase-spec)
+  (let [{:keys [java-root] :as params} (:params phase-spec)
+        classpath (resolve-classpath params)
         n (core/compile-errors-dir! java-root :classpath classpath)]
     (println (str "  compile errors checked: " (count n) " files"))))
 
 ;; コンパイルOKなファイルだけref投入
 (defmethod run-phase! :ingest/jref-gen-tests [trial phase-spec]
-  (let [{:keys [java-root classpath]} (:params phase-spec)
+  (let [{:keys [java-root] :as params} (:params phase-spec)
+        classpath (resolve-classpath params)
         ok-files (->> (core/compile-ok-java-files java-root :classpath classpath)
                       (remove nil?))
         n (if (seq ok-files)
@@ -160,20 +172,37 @@
       (let [avg-loc (if (seq all-results)
                       (double (/ (reduce + 0 (map :gta/loc all-results)) (count all-results)))
                       0.0)
+            avg-src-loc (if (seq all-results)
+                          (double (/ (reduce + 0 (map #(or (:gta/src-loc %) 0) all-results))
+                                     (count all-results)))
+                          0.0)
+            avg-loc-norm (if (seq all-results)
+                           (double (/ (reduce + 0 (map #(or (:gta/loc-norm %) 0.0) all-results))
+                                      (count all-results)))
+                           0.0)
             avg-assertions (if (seq all-results)
                              (double (/ (reduce + 0 (map :gta/assertions all-results)) (count all-results)))
                              0.0)]
         (println (format "    平均 LOC: %.1f, 平均 Assertion: %.1f" avg-loc avg-assertions))
+        (println (format "    平均 Src LOC: %.1f, 平均 正規化 LOC: %.2f" avg-src-loc avg-loc-norm))
         (println (format "    コンパイル可能: %d / %d (%.1f%%)" compiles-count (count all-results) compiles-pct))))))
 
 (defmethod run-phase! :query/gen-tests-a-rank [trial _]
   (let [trial-id (:trial/id trial)]
-    (println "  gen-tests A ランク確認...")
+    (println "  :A ランク対象確認...")
     (let [results (core/gen-tests :trial trial-id :rank :A)]
       (if (empty? results)
         (println "    A ランク: なし")
-        (doseq [r results]
-          (println (format "    A: %s (%.1f%%)" (:gta/class-name r) (:gta/coverage r))))))))
+        (doseq [r (sort-by :gta/class-name results)]
+          (println (format "    %-50s | LOC:%3d | Src:%4s | Norm:%7.2f | Assert:%2d | Compiles:%s"
+                           (:gta/class-name r)
+                           (:gta/loc r)
+                           (if-let [src-loc (:gta/src-loc r)]
+                             (str src-loc)
+                             "-")
+                           (double (or (:gta/loc-norm r) 0.0))
+                           (:gta/assertions r)
+                           (if (:gta/compiles? r) "✓" "✗"))))))))
 
 (defmethod run-phase! :regenerate/b-rank-tests [trial phase-spec]
   (let [trial-id (:trial/id trial)
@@ -182,9 +211,13 @@
         results  (core/gen-tests :trial trial-id :rank rank)]
     (println (str "  " rank " ランク対象: " (count results) " テスト"))
     (doseq [r (sort-by :gta/class-name results)]
-      (println (format "    %-50s | LOC:%3d | Assert:%2d | Compiles:%s"
+      (println (format "    %-50s | LOC:%3d | Src:%4s | Norm:%7.2f | Assert:%2d | Compiles:%s"
                        (:gta/class-name r)
                        (:gta/loc r)
+                       (if-let [src-loc (:gta/src-loc r)]
+                         (str src-loc)
+                         "-")
+                       (double (or (:gta/loc-norm r) 0.0))
                        (:gta/assertions r)
                        (if (:gta/compiles? r) "✓" "✗"))))))
 
@@ -195,11 +228,53 @@
         results  (core/gen-tests :trial trial-id :rank rank)]
     (println (str "  " rank " ランク対象: " (count results) " テスト"))
     (doseq [r (sort-by :gta/class-name results)]
-      (println (format "    %-50s | LOC:%3d | Assert:%2d | Compiles:%s"
+      (println (format "    %-50s | LOC:%3d | Src:%4s | Norm:%7.2f | Assert:%2d | Compiles:%s"
                        (:gta/class-name r)
                        (:gta/loc r)
+                       (if-let [src-loc (:gta/src-loc r)]
+                         (str src-loc)
+                         "-")
+                       (double (or (:gta/loc-norm r) 0.0))
                        (:gta/assertions r)
                        (if (:gta/compiles? r) "✓" "✗"))))))
+
+(defmethod run-phase! :regenerate/d-rank-tests [trial _]
+  (let [trial-id (:trial/id trial)
+        results  (core/gen-tests :trial trial-id :rank :D)
+        get-error-info
+        (fn [class-name]
+          (let [docs (core/q '(from :java-compile-errors
+                                [{:xt/id id
+                                  :java/compile-errors errs
+                                  :file/path fpath}]))
+                matching (filter #(str/includes? (:fpath %) (str class-name "Test.java")) docs)]
+            (if-let [doc (first matching)]
+              (let [errs   (or (:errs doc) [])
+                    errors (filter #(not= (str (:kind %)) "NOTE") errs)
+                    kinds  (sort (map str (set (map :kind errors))))]
+                {:count (count errors)
+                 :kinds (str/join ", " kinds)})
+              {:count 0
+               :kinds ""})))]
+    (println (str "  :D ランク対象: " (count results) " テスト"))
+    (if (empty? results)
+      (println "    D ランク: なし")
+      (doseq [r (sort-by :gta/class-name results)]
+        (let [info     (get-error-info (:gta/class-name r))
+              kind-str (if (empty? (:kinds info))
+                         ""
+                         (str " [" (:kinds info) "]"))]
+          (println (format "    %-50s | LOC:%3d | Src:%4s | Norm:%7.2f | Assert:%2d | Compiles:%s Errors:%d%s"
+                           (:gta/class-name r)
+                           (:gta/loc r)
+                           (if-let [src-loc (:gta/src-loc r)]
+                             (str src-loc)
+                             "-")
+                           (double (or (:gta/loc-norm r) 0.0))
+                           (:gta/assertions r)
+                           (if (:gta/compiles? r) "✓" "✗")
+                           (:count info)
+                           kind-str)))))))
 
 (defmethod run-phase! :default [_ phase-spec]
   (throw (ex-info (str "Unknown phase: " (:phase phase-spec))

@@ -237,6 +237,16 @@
   [source-code]
   (count (re-seq #"\.\s*[a-z_][a-zA-Z0-9]*\s*\(" source-code)))
 
+(defn- normalized-loc
+  "テスト LOC を対象クラス LOC で正規化した値を返す。
+   src-loc が無い場合は raw LOC をそのまま返す。"
+  [loc src-loc]
+  (let [loc (double (or loc 0))
+        src-loc (double (or src-loc 0))]
+    (if (pos? src-loc)
+      (/ loc (Math/log1p src-loc))
+      loc)))
+
 
 ;;
 ;; syntactically-closed? は、AI生成コードの途中切れやコメント未閉鎖を
@@ -278,13 +288,16 @@
          (filter #(= abs-path (:fpath %)))
          first)))
 
-(defn- compile-errors-for-gen-test
-  "生成テストの compile errors を返す。
-   XTDB に compile errors doc があればそれを優先し、無ければ javac でその場診断する。"
+(defn- compile-status-for-gen-test
+  "生成テストの diagnostics と compile failure 判定を返す。
+   XTDB doc があればその :java/compile-error? を優先し、無ければ diagnostics の ERROR 有無で判定する。"
   [node test-file-path]
   (if-let [compile-errors-doc (compile-errors-for-file node test-file-path)]
-    (or (:errs compile-errors-doc) [])
-    (javac/compile-with-diagnostics test-file-path)))
+    {:diagnostics (or (:errs compile-errors-doc) [])
+     :failed?     (boolean (:err? compile-errors-doc))}
+    (let [diagnostics (javac/compile-with-diagnostics test-file-path)]
+      {:diagnostics diagnostics
+       :failed?     (javac/compile-failed? diagnostics)})))
 
 (defn analyze-gen-test
   "生成されたテストファイル（Test.java）を品質スコアに基づいてランク分けする（A/B/C/D）。
@@ -312,14 +325,16 @@
      C: LOC >= 20
      D: LOC < 20
   "
-  [node test-file-path trial & {:keys [class-name]}]
+  [node test-file-path trial & {:keys [class-name src-loc]}]
   (try
     (let [source (slurp test-file-path)
           loc (count-lines source)
           assertions (count-assertions source)
           method-calls (count-method-calls source)
-          compile-errors (compile-errors-for-gen-test node test-file-path)
-          compiles? (empty? compile-errors)
+          loc-norm (normalized-loc loc src-loc)
+          {:keys [diagnostics failed?]} (compile-status-for-gen-test node test-file-path)
+          compile-errors diagnostics
+          compiles? (not failed?)
           
           ;; ランク判定（品質スコアベース）
           ;; コンパイル不可 → 自動 D ランク
@@ -334,6 +349,8 @@
       {:class-name class-name
        :rank rank
        :loc loc
+       :src-loc src-loc
+       :loc-norm loc-norm
        :assertions assertions
        :method-calls method-calls
        :compiles? compiles?
@@ -349,6 +366,8 @@
        :rank :D
        :error (str e)
        :loc 0
+       :src-loc src-loc
+       :loc-norm 0.0
        :assertions 0
        :method-calls 0
        :compiles? false
@@ -394,23 +413,26 @@
                     (let [test-java-path (str gen-tests-dir "/" class-dir "/" class-dir "Test.java")
                           test-file (io/file test-java-path)]
                       (if (.exists test-file)
-                        (let [analysis (analyze-gen-test node test-java-path trial :class-name class-dir)
-                              src-file (find-src-file class-dir)
+                        (let [src-file (find-src-file class-dir)
                               src-loc (when src-file
                                         (try
                                           (let [s (slurp src-file)]
                                             (count-lines s))
                                           (catch Exception _ 0)))
+                              analysis (analyze-gen-test node test-java-path trial
+                                                         :class-name class-dir
+                                                         :src-loc src-loc)
                               doc {:xt/id (str trial "::" class-dir)
                                    :gta/trial trial
                                    :gta/class-name class-dir
                                    :gta/rank (:rank analysis)
                                    :gta/loc (:loc analysis)
+                                   :gta/src-loc src-loc
+                                   :gta/loc-norm (:loc-norm analysis)
                                    :gta/assertions (:assertions analysis)
                                    :gta/method-calls (:method-calls analysis)
                                    :gta/compiles? (:compiles? analysis)
                                    :gta/coverage (:coverage analysis)
-                                   :gta/src-loc src-loc
                                    :gta/analyzed-at (java.time.Instant/now)}]
                           doc)
                         ;; Test.java が見つからない場合はスキップ

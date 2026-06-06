@@ -9,7 +9,6 @@
     [xtdb.api])
   (:import
     [javax.tools ToolProvider DiagnosticCollector JavaFileObject SimpleJavaFileObject JavaFileObject$Kind]
-    [java.net URI]
     [java.nio.file Files Paths]))
 
 ;; Javaファイルパス→JavaFileObject変換
@@ -18,6 +17,29 @@
         uri (.toUri p)]
     (proxy [SimpleJavaFileObject] [uri JavaFileObject$Kind/SOURCE]
       (getCharContent [_] (String. (Files/readAllBytes p))))))
+
+(defn diagnostic-error?
+  "Diagnostic map がコンパイル失敗を意味する ERROR かどうか。"
+  [diag]
+  (= "ERROR" (str (:kind diag))))
+
+(defn compile-failed?
+  "Diagnostic maps に ERROR が1件でも含まれていれば true。"
+  [diagnostics]
+  (boolean (some diagnostic-error? diagnostics)))
+
+(defn- delete-tree!
+  "一時ディレクトリを再帰削除する。失敗しても診断処理は継続する。"
+  [path]
+  (when path
+    (try
+      (with-open [stream (Files/walk path (make-array java.nio.file.FileVisitOption 0))]
+        (doseq [p (->> (.toArray stream)
+                       (map #(cast java.nio.file.Path %))
+                       (sort #(compare %2 %1)))]
+          (Files/deleteIfExists p)))
+      (catch Exception _
+        nil))))
 
 ;; DiagnosticCollectorでコンパイルし、エラー情報をマップで返す
 (defn compile-with-diagnostics
@@ -29,17 +51,21 @@
   (let [compiler (ToolProvider/getSystemJavaCompiler)
         diagnostics (DiagnosticCollector.)
         file-obj (file->javafileobject java-file-path)
-        options (cond-> []
+        out-dir (Files/createTempDirectory "workbench-javac-" (make-array java.nio.file.attribute.FileAttribute 0))
+        options (cond-> ["-d" (str out-dir)]
                   classpath (into ["-classpath" classpath]))
         task (.getTask compiler nil nil diagnostics options nil [file-obj])]
-    (.call task)
-    (map (fn [diag]
-           {:kind (str (.getKind diag))
-            :msg (.getMessage diag nil)
-            :line (.getLineNumber diag)
-            :col (.getColumnNumber diag)
-            :file (str (.getSource diag))})
-         (.getDiagnostics diagnostics))))
+    (try
+      (.call task)
+      (map (fn [diag]
+             {:kind (str (.getKind diag))
+              :msg (.getMessage diag nil)
+              :line (.getLineNumber diag)
+              :col (.getColumnNumber diag)
+              :file (str (.getSource diag))})
+           (.getDiagnostics diagnostics))
+      (finally
+        (delete-tree! out-dir)))))
 
 ;; DiagnosticCollectorのエラー情報をXTDBに格納する
 (defn compile-errors-to-xtdb!
@@ -53,6 +79,6 @@
         doc {:xt/id java-file-path
              :java/compile-errors errors
              :file/path java-file-path
-             :java/compile-error? (not (empty? errors))}]
+             :java/compile-error? (compile-failed? errors)}]
     (xtdb.api/submit-tx node [[:put-docs :java-compile-errors doc]])
     doc))

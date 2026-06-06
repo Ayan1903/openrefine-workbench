@@ -92,6 +92,11 @@
       (:errors doc)
       []))
 
+(defn- compile-error-doc-failed? [doc]
+  (if (contains? doc :java/compile-error?)
+    (boolean (:java/compile-error? doc))
+    (not (empty? (compile-error-doc-errors doc)))))
+
 (defn- compile-error-doc-file [doc]
   (or (:file/path doc)
       (:file doc)))
@@ -102,7 +107,7 @@
   [root & {:keys [classpath]}]
   (let [errs (compile-errors-dir! root :classpath classpath)]
     (->> errs
-         (filter #(empty? (compile-error-doc-errors %)))
+         (remove compile-error-doc-failed?)
          (mapv compile-error-doc-file))))
 
 ;; -------------------------
@@ -2666,16 +2671,20 @@
                                           :gta/class-name cn
                                           :gta/rank r
                                           :gta/loc l
+                                          :gta/src-loc sl
+                                          :gta/loc-norm ln
                                           :gta/assertions a
                                           :gta/method-calls mc
                                           :gta/compiles? comp
                                           :gta/coverage c}]))]
     (->> results
-         (map (fn [{:keys [t cn r l a mc comp c]}]
+         (map (fn [{:keys [t cn r l sl ln a mc comp c]}]
                 {:gta/trial t
                  :gta/class-name cn
                  :gta/rank r
                  :gta/loc l
+                 :gta/src-loc sl
+                 :gta/loc-norm ln
                  :gta/assertions a
                  :gta/method-calls mc
                  :gta/compiles? comp
