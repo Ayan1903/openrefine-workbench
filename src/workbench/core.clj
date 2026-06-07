@@ -20,6 +20,7 @@
    [workbench.jref      :as jref]
    [workbench.query     :as query]
    [workbench.sqlref    :as sqlref]
+   [workbench.testfix   :as testfix]
    [workbench.visualize :as visualize]
    [xtdb.api            :as xt]
    [xtdb.node           :as xtn]))
@@ -2743,3 +2744,25 @@
      (ingest-analyze-gen-tests! \"trials/experiments/.../exports/gen-tests\" :trial \"tradehub\")"
   [gen-tests-dir & {:keys [trial src-roots]}]
   (ingest/analyze-gen-tests-dir! (node) :gen-tests-dir gen-tests-dir :trial trial :src-roots src-roots))
+
+(defn fix-bucket!
+  "1つの error bucket を end-to-end で修正する。
+   runner.clj の :testfix/fix-bucket フェーズから呼ばれる。
+
+   java-path: テストファイルパス（相対 or 絶対）
+   opts:
+     :trial - トライアル ID
+     :class-name - 対象クラス名
+     :src-root - ソースルート
+     :bucket-index - エラーバケットインデックス（デフォルト 0）
+     :classpath - コンパイル時 classpath
+     :model - AI モデル（デフォルト \"openai/gpt-4.1\"）
+
+   例:
+     (fix-bucket! \"trials/.../DocumentAggregateServiceImplTest.java\"
+                  :trial \"tradehub\"
+                  :class-name \"DocumentAggregateServiceImpl\"
+                  :src-root \"trials/.../repo/common-lib/src/main/java\"
+                  :bucket-index 0)"
+  [java-path & opts]
+  (apply testfix/fix-bucket! (node) java-path opts))

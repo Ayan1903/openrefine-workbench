@@ -276,6 +276,24 @@
                            (:count info)
                            kind-str)))))))
 
+;; テスト修正フェーズ
+(defmethod run-phase! :testfix/fix-bucket [trial phase-spec]
+  (let [{:keys [java-path class-name src-root bucket-index classpath]} (:params phase-spec)
+        trial-id (:trial/id trial)
+        cp (or classpath (resolve-classpath (:params phase-spec)))
+        result (core/fix-bucket! java-path
+                                :trial trial-id
+                                :class-name class-name
+                                :src-root src-root
+                                :bucket-index bucket-index
+                                :classpath cp)]
+    (when-let [req-summary (get-in result [:request :summary])]
+      (println (str "  Request: " req-summary)))
+    (when-let [patch-summary (get-in result [:patch :summary])]
+      (println (str "  Patch: " patch-summary)))
+    (when-let [recheck (get-in result [:recheck])]
+      (println (str "  Recheck: " (:error-count recheck) " errors, compile-ok=" (:compile-ok? recheck))))))
+
 (defmethod run-phase! :default [_ phase-spec]
   (throw (ex-info (str "Unknown phase: " (:phase phase-spec))
                   {:phase-spec phase-spec})))
