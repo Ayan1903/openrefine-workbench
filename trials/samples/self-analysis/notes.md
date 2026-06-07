@@ -250,3 +250,6 @@ openrefine-runner/run-trial
 
 **読み**: `run-trial` は 9 ステップのオーケストレーター。  
 HTTP ユーティリティ（`http-client` / `http-get-text` / `utf8-bytes`）が各ステップで共有されており、ファンイン集計で `utf8-bytes` が最多（6）になる理由がここで明確になる。
+
+## 作業メモ 2026.6.7
+guix shell -m manifest.scm -- clojure -M:xtdb -e '(do (require (quote workbench.core) (quote workbench.testfix)) (workbench.core/start!) (let [req (workbench.testfix/prepare-fix-request (workbench.core/node) "trials/experiments/2026-04-28-tradehub/exports/gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java" :trial "tradehub" :class-name "DocumentAggregateServiceImpl" :src-root "trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java" :bucket-index 0) patch (workbench.testfix/generate-fix-patch! req)] (spit "/tmp/DocumentAggregateServiceImplTest.mdctx.diff" (:diff patch)) (spit "/tmp/DocumentAggregateServiceImplTest.mdctx.summary.txt" (or (:summary patch) "")) (println "SUMMARY-BEGIN") (println (:summary patch)) (println "SUMMARY-END") (println "DIFF-FILE /tmp/DocumentAggregateServiceImplTest.mdctx.diff") (println "SUMMARY-FILE /tmp/DocumentAggregateServiceImplTest.mdctx.summary.txt") (workbench.core/stop!)))'
