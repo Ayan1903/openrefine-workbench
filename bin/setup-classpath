@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# bin/setup-classpath <trial.edn>
+#
+# trial.edn の :maven/classpath-config から classpath ファイルを自動生成
+# MVNコマンド実行 → target/classes を末尾に追加 → 最終ファイル出力
+
+set -euo pipefail
+
+if [[ -z "${1:-}" ]]; then
+  echo "Usage: bin/setup-classpath <trial.edn>" >&2
+  exit 1
+fi
+
+TRIAL_FILE="$1"
+
+# trial.edn が :maven/classpath-config を持たなければスキップ
+if ! grep -q ':maven/classpath-config' "$TRIAL_FILE"; then
+  exit 0
+fi
+
+# Clojure で edn を読み込んで抽出
+eval "$(guix shell -m manifest.scm -- clojure -M -e "
+(require '[clojure.edn :as edn])
+(let [trial (edn/read-string (slurp \"$TRIAL_FILE\"))
+      cfg (:maven/classpath-config trial)]
+  (when cfg
+    (println (str \"REPO_ROOT='\" (:repo-root cfg) \"'\"))
+    (println (str \"MODULE='\" (:module cfg) \"'\"))
+    (println (str \"SCOPE='\" (:scope cfg) \"'\"))
+    (println (str \"OUTPUT_FILE='\" (:output-file cfg) \"'\"))
+    (println (str \"TARGET_CLASSES='\" (:target-classes-append cfg) \"'\"))
+  )
+)
+" 2>/dev/null)"
+
+# 読み込めなかったらスキップ
+if [[ -z "$REPO_ROOT" ]]; then
+  exit 0
+fi
+
+echo "Generating classpath from trial.edn:"
+echo "  repo-root: $REPO_ROOT"
+echo "  module: $MODULE"
+echo "  scope: $SCOPE"
+echo "  output-file: $OUTPUT_FILE"
+echo "  target-classes-append: $TARGET_CLASSES"
+echo ""
+
+# MVN コマンド実行
+cd "$REPO_ROOT"
+guix shell 'openjdk@21:jdk' maven -- sh -lc "
+  ./mvnw -q dependency:build-classpath \
+    -pl $MODULE \
+    -DincludeScope=$SCOPE \
+    -Dmdep.outputFile=$OUTPUT_FILE \
+  && printf \":$TARGET_CLASSES\" >> $OUTPUT_FILE \
+  && printf \"\\n\" >> $OUTPUT_FILE
+" || {
+  echo "Error generating classpath" >&2
+  exit 1
+}
+
+echo "✓ Classpath generated: $OUTPUT_FILE"

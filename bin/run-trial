@@ -4,6 +4,8 @@
 # :trial/tool に応じてランナーを切り替える:
 #   :openrefine    → openrefine-runner (OpenRefine API 制御)
 #   :xtdb-workbench → workbench.runner (XTDB フェーズパイプライン)
+#
+# trial.edn に :maven/classpath-config があれば先に classpath を生成
 
 set -euo pipefail
 
@@ -13,6 +15,10 @@ if [[ -z "${1:-}" ]]; then
 fi
 
 TRIAL_FILE="$1"
+
+# Setup classpath if needed
+echo "Setting up trial environment..."
+bash bin/setup-classpath "$TRIAL_FILE"
 
 if grep -q ':xtdb-workbench' "$TRIAL_FILE"; then
   exec guix shell -m manifest.scm -- clojure -M:xtdb -m workbench.runner "$@"
