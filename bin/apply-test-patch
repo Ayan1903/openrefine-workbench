@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# bin/apply-test-patch <java-path> [options]
+#
+# 生成された AI パッチをテストファイルに適用する。
+# 使用例:
+#   bin/apply-test-patch \
+#     trials/experiments/2026-04-28-tradehub/exports/gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java \
+#     --trial tradehub \
+#     --class-name DocumentAggregateServiceImpl \
+#     --src-root trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java
+
+set -euo pipefail
+
+if [[ -z "${1:-}" ]]; then
+  echo "Usage: bin/apply-test-patch <java-path> [--trial NAME] [--class-name NAME] [--src-root PATH] [--bucket-index N] [--classpath PATH]" >&2
+  exit 1
+fi
+
+JAVA_PATH="$1"
+shift
+
+# デフォルト値
+TRIAL=""
+CLASS_NAME=""
+SRC_ROOT=""
+BUCKET_INDEX=0
+CLASSPATH=""
+
+# オプション解析
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --trial)
+      TRIAL="$2"
+      shift 2
+      ;;
+    --class-name)
+      CLASS_NAME="$2"
+      shift 2
+      ;;
+    --src-root)
+      SRC_ROOT="$2"
+      shift 2
+      ;;
+    --bucket-index)
+      BUCKET_INDEX="$2"
+      shift 2
+      ;;
+    --classpath)
+      CLASSPATH="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Clojure コマンドを生成
+CLOJURE_CMD="
+(do
+  (require '[workbench.core] '[workbench.testfix])
+  (workbench.core/start!)
+  (try
+    (let [node (workbench.core/node)
+          req (workbench.testfix/prepare-fix-request 
+                node \"$JAVA_PATH\"
+                :trial \"$TRIAL\"
+                :class-name \"$CLASS_NAME\"
+                :src-root \"$SRC_ROOT\"
+                :bucket-index $BUCKET_INDEX)
+          patch (workbench.testfix/generate-fix-patch! req)
+          applied (workbench.testfix/apply-fix-patch! patch)]
+      (println \"✓ Patch applied to: $JAVA_PATH\")
+      (println \"\")
+      (println \"Summary:\")
+      (println (:summary applied))
+      (println \"\")
+      (println \"Applied successfully. Recompile to verify.\"))
+    (finally
+      (workbench.core/stop!))))
+"
+
+exec guix shell -m manifest.scm -- clojure -M:xtdb -e "$CLOJURE_CMD"
