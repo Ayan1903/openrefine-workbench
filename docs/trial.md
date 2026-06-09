@@ -46,8 +46,11 @@ trial.edn
 [generate phase]
     ↓ gen-tests-uncovered でテストスケルトンを生成
     ↓ merge-all-test-mds で Test.java に統合
-    ↓ fix-tests-dir でコンパイルエラーを修正
     ↓ exports/ に出力
+    ↓
+[testfix phase]
+    ↓ [:testfix/fix-bucket] で コンパイルエラーを AI 修正
+    ↓ 修正済みテストを再出力
 ```
 
 ---
@@ -177,10 +180,18 @@ $EDITOR trials/YOUR-TRIAL-ID/trial.edn
  :input/clj-roots
  ["trials/experiments/2026-04-28-tradehub/repo/clojure"]
 
+ ;; Maven classpath 自動生成設定（bin/run-trial 実行時に処理）
+ :maven/classpath-config
+ {:repo-root "trials/experiments/2026-04-28-tradehub/repo"
+  :module "common-lib"
+  :scope "test"
+  :output-file "/tmp/tradehub-common-lib-gen-tests.classpath"
+  :target-classes-append "trials/experiments/2026-04-28-tradehub/repo/common-lib/target/classes"}
+
  :goal "マイクロサービス分解に向けた影響分析"
 
  :notes/file "notes.md"
- :output/dir "exports"}
+ :output/dir "exports"
 ```
 
 | キー | 説明 |
@@ -189,6 +200,12 @@ $EDITOR trials/YOUR-TRIAL-ID/trial.edn
 | `:input/java-roots` | jref!/jsig! の対象ディレクトリ（複数可） |
 | `:input/clj-roots` | xref! の対象ディレクトリ（任意） |
 | `:input/roots` | Java/Clojure 両方を含む場合の簡略指定 |
+| `:maven/classpath-config` | (任意) Maven 依存関係解決設定（テストコンパイル時に必要） |
+| `:maven/classpath-config.repo-root` | Maven プロジェクトのルートディレクトリ |
+| `:maven/classpath-config.module` | 対象 Maven モジュール（複数モジュール構成の場合） |
+| `:maven/classpath-config.scope` | 依存スコープ（通常は `"test"`） |
+| `:maven/classpath-config.output-file` | 生成したクラスパスファイルの出力先（/tmp 推奨） |
+| `:maven/classpath-config.target-classes-append` | プロジェクトの target/classes パスを末尾に追加 |
 
 ---
 

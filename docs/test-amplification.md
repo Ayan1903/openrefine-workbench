@@ -513,6 +513,96 @@ MAVEN_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED" \
 
 ---
 
+## テスト修正フェーズ（`:testfix/fix-bucket`）
+
+生成テストのコンパイルエラーを AI で自動修正する専用フェーズです。  
+`trial.edn` に `:testfix/fix-bucket` として組み込むことで、runner パイプラインから直接実行できます。
+
+### 使用シーン
+
+生成テスト（`.md` → `.java` に統合）がコンパイルエラーを含む場合：
+
+```
+javac エラー（型不一致・存在しないメソッド等）
+    │
+    ▼
+[:testfix/fix-bucket] フェーズ実行（runner から自動実行）
+    │
+    ├─ エラーをグループ化（バケット）
+    ├─ AI でエラー を修正（コメントアウト or 型修正）
+    ├─ 修正結果を Test.java に書き込み
+    └─ 再度 javac でコンパイル検証
+    │
+    ▼
+修正済み Test.java（コンパイル可能）
+```
+
+### trial.edn での設定
+
+```edn
+{:trial/id "2026-04-28-tradehub"
+ :trial/tool :xtdb-workbench
+
+ ;; ... 他の設定
+
+ :maven/classpath-config                       ; testfix フェーズが使用
+ {:repo-root "trials/experiments/.../repo"
+  :module "common-lib"
+  :scope "test"
+  :output-file "/tmp/tradehub-common-lib-gen-tests.classpath"
+  :target-classes-append "..."}
+
+ :phases [
+  {:phase :generate/tests ...}
+  {:phase :generate/merge-tests ...}
+  
+  ;; ✅ testfix フェーズ：生成テストのコンパイルエラーを自動修正
+  {:phase :testfix/fix-bucket
+   :params {:java-path "trials/experiments/.../exports/gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java"
+            :class-name "DocumentAggregateServiceImpl"
+            :src-root "trials/experiments/.../repo/common-lib/src/main/java"
+            :bucket-index 0                                           ; エラーバケットの番号
+            :classpath-file "/tmp/tradehub-common-lib-gen-tests.classpath"}}
+ ]}
+```
+
+### 実行フロー
+
+```
+run-trial
+  ├─ setup-classpath  ←  Maven classpath 自動生成（:maven/classpath-config から）
+  ├─ ingest/jref ... (前フェーズ)
+  ├─ generate/tests
+  ├─ generate/merge-tests
+  ├─ ingest/compile-errors-gen-tests  ← 生成テストのコンパイルエラーを検出・保存
+  │
+  ├─ [:testfix/fix-bucket] ✅
+  │   ├─ bucket-index=0 のエラーグループを特定
+  │   ├─ test-context を構築（srcroot から型情報）
+  │   ├─ エラー修正プロンプトを GitHub Models API に送信
+  │   ├─ 修正結果を Test.java に反映
+  │   └─ javac でコンパイル検証（recheck）
+  │
+  └─ (以降のフェーズ)
+```
+
+### REPL での使用（runner 外）
+
+```clojure
+(core/fix-bucket!
+  "trials/experiments/.../gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java"
+  :trial "tradehub"
+  :class-name "DocumentAggregateServiceImpl"
+  :src-root "trials/experiments/.../repo/common-lib/src/main/java"
+  :bucket-index 0
+  :classpath-file "/tmp/tradehub-common-lib-gen-tests.classpath")
+;; => {:request {...}  :patch {...}  :recheck {...}}
+```
+
+詳細は [docs/api.md](api.md) の「`fix-bucket!`」セクションを参照。
+
+---
+
 ## カバレッジ増幅サイクル
 
 ```

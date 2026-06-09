@@ -712,6 +712,59 @@ JaCoCo XML レポートを解析して XTDB に取り込み、「テストが届
 | `:force` | `true` のとき `dest-dir` に既存ファイルがあっても上書き（`fix-tests-dir` のみ） |
 | `:dry-run` | `true` のとき API を呼ばず対象ファイル一覧のみ表示（`fix-tests-dir` のみ） |
 
+### `fix-bucket!` — Runner フェーズとしての修正（推奨）
+
+`fix-test` / `fix-tests-dir` と異なり、trial.edn の `:phases` パイプラインに `:testfix/fix-bucket` として統合でき、runner が自動実行できる。  
+単一ファイルの単一バケット（エラーグループ）を修正する。
+
+**trial.edn での使用例:**
+
+```edn
+:phases
+[...
+ {:phase :testfix/fix-bucket
+  :params {:java-path "trials/experiments/2026-04-28-tradehub/exports/gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java"
+           :class-name "DocumentAggregateServiceImpl"
+           :src-root "trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java"
+           :bucket-index 0
+           :classpath-file "/tmp/tradehub-common-lib-gen-tests.classpath"}}]
+```
+
+**REPL での使用:**
+
+```clojure
+(core/fix-bucket!
+  "trials/experiments/2026-04-28-tradehub/exports/gen-tests/DocumentAggregateServiceImpl/DocumentAggregateServiceImplTest.java"
+  :trial "tradehub"
+  :class-name "DocumentAggregateServiceImpl"
+  :src-root "trials/experiments/2026-04-28-tradehub/repo/common-lib/src/main/java"
+  :bucket-index 0
+  :classpath-file "/tmp/tradehub-common-lib-gen-tests.classpath")
+;; => {:request {:summary "修正リクエストサマリー"} :patch {...} :recheck {...}}
+```
+
+| オプション | 説明 |
+|---|---|
+| `java-path` | 修正対象の `.java` ファイルパス |
+| `:trial` | トライアル識別子 |
+| `:class-name` | クラス名（バケット特定用） |
+| `:src-root` | プロダクションコードのルート（シグネチャ解決用） |
+| `:bucket-index` | バケット番号（エラーグループの番号。0 から開始） |
+| `:classpath-file` | Maven 依存のクラスパスファイル（test コンパイル時に使用） |
+| `:model` | 使用モデル（デフォルト: `"openai/gpt-4.1"`） |
+
+戻り値: `{:request {...}, :patch {...}, :recheck {...}}`
+- `:request` — AI へのリクエスト要約（`summary` キー）
+- `:patch` — パッチ適用結果（`summary`, `diff` キー）
+- `:recheck` — パッチ後のコンパイル検証（`error-count`, `compile-ok?` キー）
+
+**メリット:**
+- runner フェーズとして組み込み可能 → 他の分析ステップと連携
+- trial.edn で再現性確保 → PC リブート後も同じ configuration で実行可能
+- modify-check-modify のサイクルを runner で自動化可能
+
+---
+
 ### `patch-test-from-mds` — 既存テストへの追記
 
 既にリポジトリにある `*Test.java` に、per-method md から抽出した `@Test` メソッドを追記する。  

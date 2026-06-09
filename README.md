@@ -207,6 +207,9 @@ guix shell -m manifest.scm -- clojure -A:xtdb -M test/smoke_test.clj trials/samp
 | `gen-test` — GitHub Models API 経由 JUnit 5 テスト生成 | ✅ |
 | `uncovered-sql-methods` — 未カバー × SQL 縛りメソッド一覧 | ✅ |
 | `gen-tests-uncovered` — 候補全件の一括テスト生成 | ✅ |
+| `merge-all-test-mds` — per-method md を統合して Test.java を生成 | ✅ |
+| `fix-bucket!` — テスト修正フェーズ（AI 修正 + コンパイル検証）— runner `:testfix/fix-bucket` フェーズとして実行可能 | ✅ |
+| `bin/setup-classpath` — Maven classpath 自動生成（trial.edn `:maven/classpath-config` から） | ✅ |
 
 ### OpenRefine trial ワークフロー
 
