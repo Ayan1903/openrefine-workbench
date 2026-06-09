@@ -349,6 +349,60 @@ guix shell -m manifest.scm -- clojure -A:xtdb -M test/smoke_test.clj trials/samp
 | `merge-all-test-mds` — per-method md を統合して Test.java を生成 | ✅ |
 | `fix-bucket!` — テスト修正フェーズ（AI 修正 + コンパイル検証）— runner `:testfix/fix-bucket` フェーズとして実行可能 | ✅ |
 | `bin/setup-classpath` — Maven classpath 自動生成（trial.edn `:maven/classpath-config` から） | ✅ |
+| `:testfix/fix-bucket-batch` — 複数ファイル × 複数バケット一括修正（Phase 3） | ✅ |
+| `:testfix/fix-bucket-cycle` — 修正サイクル自動繰り返し（エラー減少まで）（Phase 3） | ✅ |
+| `:testfix/fix-selected-classes` — クラス名指定による選別修正（Phase 3） | ✅ |
+
+---
+
+## Phase 3: Runner Flexibility — 複数ファイル・非線形実行
+
+テスト修正を **バッチ処理**・**サイクル制御**・**選別実行** でスケールさせます。
+
+### 新しい 3 つのフェーズ
+
+| フェーズ | 説明 | 用途 |
+|---|---|---|
+| `:testfix/fix-bucket-batch` | 複数ファイル × 複数バケットを一度に処理 | 同じエラー種のファイル群を並列化 |
+| `:testfix/fix-bucket-cycle` | modify → check → modify サイクルを自動繰り返し（エラー減少まで） | 難しいエラーパターン（複数試行が必要） |
+| `:testfix/fix-selected-classes` | クラス名指定で該当テストだけ修正 | 優先度付け・段階的修正 |
+
+### trial.edn での使用例
+
+```edn
+{:trial/id "2026-04-28-tradehub-phase3"
+ 
+ :phases [
+  ;; Phase 1-2: データ投入 + テスト生成
+  {:phase :ingest/jref :params {...}}
+  {:phase :generate/tests :params {...}}
+  
+  ;; Phase 3: Runner Flexibility
+  
+  ;; パターン 1: 複数ファイルを一括修正
+  {:phase :testfix/fix-bucket-batch
+   :params {:java-paths ["exports/gen-tests/ClassA/ClassATest.java"
+                         "exports/gen-tests/ClassB/ClassBTest.java"]
+            :bucket-indices [0 1 2]
+            :classpath-file "/tmp/classpath.txt"}}
+  
+  ;; パターン 2: 1 ファイルで繰り返し修正（エラーが減るまで）
+  {:phase :testfix/fix-bucket-cycle
+   :params {:java-path "exports/gen-tests/ComplexServiceTest.java"
+            :bucket-index 0
+            :max-retries 5
+            :classpath-file "/tmp/classpath.txt"}}
+  
+  ;; パターン 3: 特定クラスだけ修正（優先度付け）
+  {:phase :testfix/fix-selected-classes
+   :params {:java-root "exports/gen-tests"
+            :class-names ["DocumentAggregateServiceImpl" 
+                          "GenericMasterCsvServiceImpl"]
+            :classpath-file "/tmp/classpath.txt"}}
+ ]}
+```
+
+**詳細は [docs/trial.md#phase-3-runner-flexibility](docs/trial.md#phase-3-runner-flexibility-複数ファイル非線形実行) を参照。**
 
 ---
 
