@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="720" viewBox="0 0 1080 720" role="img" aria-labelledby="title desc">
+  <title id="title">OpenRefine XTDB slicing loop</title>
+  <desc id="desc">OpenRefine, XTDB, and Clojure roles with a slicing workflow loop and trial feedback.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f6f1e8"/>
+      <stop offset="100%" stop-color="#e5efe8"/>
+    </linearGradient>
+    <linearGradient id="panelA" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fff9ef"/>
+      <stop offset="100%" stop-color="#f3ebdc"/>
+    </linearGradient>
+    <linearGradient id="panelB" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#eef8f3"/>
+      <stop offset="100%" stop-color="#d9ece4"/>
+    </linearGradient>
+    <linearGradient id="panelC" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#edf4fb"/>
+      <stop offset="100%" stop-color="#d8e7f5"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#30444f"/>
+    </marker>
+    <style>
+      .title { font: 700 34px ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #1f2f33; }
+      .subtitle { font: 500 16px ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #4c5d61; }
+      .h { font: 700 22px ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #203238; }
+      .k { font: 700 14px ui-sans-serif, system-ui, -apple-system, sans-serif; letter-spacing: 0.08em; fill: #5a6b6e; }
+      .b { font: 500 16px ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #27373b; }
+      .s { font: 500 14px ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #516266; }
+      .mono { font: 600 14px ui-monospace, SFMono-Regular, Consolas, monospace; fill: #25404a; }
+      .chip { font: 600 13px ui-sans-serif, system-ui, -apple-system, sans-serif; fill: #274049; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1080" height="720" fill="url(#bg)"/>
+
+  <text x="60" y="70" class="title">OpenRefine × XTDB × Clojure</text>
+  <text x="60" y="102" class="subtitle">構造化された意味情報を計算し、OpenRefine で人間の判断を重ね、trial に戻して再利用する。</text>
+
+  <rect x="60" y="150" rx="26" ry="26" width="290" height="240" fill="url(#panelA)" stroke="#ccb788" stroke-width="2"/>
+  <text x="90" y="192" class="k">EXPLORATION LAYER</text>
+  <text x="90" y="226" class="h">OpenRefine</text>
+  <text x="90" y="258" class="b">探索 UI / 編集 UI</text>
+  <text x="90" y="298" class="s">facet / filter / cross / clustering</text>
+  <text x="90" y="326" class="s">source-lines, methods, calls を突き合わせる</text>
+  <text x="90" y="354" class="s">除外・タグ付け・優先度付けを人間が加える</text>
+
+  <rect x="395" y="150" rx="26" ry="26" width="290" height="240" fill="url(#panelB)" stroke="#8fb9a8" stroke-width="2"/>
+  <text x="425" y="192" class="k">PERSISTENCE LAYER</text>
+  <text x="425" y="226" class="h">XTDB</text>
+  <text x="425" y="258" class="b">意味情報ストア / 永続層</text>
+  <text x="425" y="298" class="s">AST, xref, jref, jsig, call graph</text>
+  <text x="425" y="326" class="s">SQL / coverage などの補助情報を保持</text>
+  <text x="425" y="354" class="s">trial 単位でクエリ結果を再利用する</text>
+
+  <rect x="730" y="150" rx="26" ry="26" width="290" height="240" fill="url(#panelC)" stroke="#89a9c4" stroke-width="2"/>
+  <text x="760" y="192" class="k">COMPUTE LAYER</text>
+  <text x="760" y="226" class="h">Clojure</text>
+  <text x="760" y="258" class="b">スライス計算エンジン</text>
+  <text x="760" y="298" class="s">ingest / xref / jref / jsig</text>
+  <text x="760" y="326" class="s">call graph, impact, neighborhood を計算</text>
+  <text x="760" y="354" class="s">CSV / JSON / EDN へ整形して渡す</text>
+
+  <path d="M 350 270 C 370 240, 375 240, 395 270" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="340" y="232" class="chip">cross / query</text>
+
+  <path d="M 685 270 C 705 240, 710 240, 730 270" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="678" y="232" class="chip">slice query</text>
+
+  <path d="M 730 320 C 690 410, 390 430, 280 390" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="465" y="444" class="chip">CSV / JSON export</text>
+
+  <rect x="100" y="480" rx="24" ry="24" width="880" height="170" fill="#fffdfa" stroke="#d0c4ae" stroke-width="2"/>
+  <text x="135" y="522" class="k">SLICING LOOP</text>
+
+  <rect x="135" y="545" rx="18" ry="18" width="145" height="56" fill="#f6ead7" stroke="#cfb27b"/>
+  <text x="163" y="579" class="mono">1. ingest</text>
+
+  <rect x="315" y="545" rx="18" ry="18" width="165" height="56" fill="#dff0e8" stroke="#94bca8"/>
+  <text x="342" y="579" class="mono">2. compute slice</text>
+
+  <rect x="515" y="545" rx="18" ry="18" width="150" height="56" fill="#dceaf6" stroke="#90adc8"/>
+  <text x="537" y="579" class="mono">3. export table</text>
+
+  <rect x="700" y="545" rx="18" ry="18" width="150" height="56" fill="#f6ead7" stroke="#cfb27b"/>
+  <text x="729" y="579" class="mono">4. explore UI</text>
+
+  <rect x="885" y="545" rx="18" ry="18" width="60" height="56" fill="#eae7f6" stroke="#a49bc8"/>
+  <text x="901" y="579" class="mono">5.</text>
+
+  <path d="M 280 573 H 315" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M 480 573 H 515" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M 665 573 H 700" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M 850 573 H 885" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <text x="902" y="544" class="chip">feedback</text>
+  <text x="888" y="624" class="s">trial に戻す</text>
+  <path d="M 915 601 C 915 635, 175 655, 175 612" fill="none" stroke="#30444f" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <text x="134" y="624" class="s">method 粒度を主軸にし、必要なときだけ line 粒度へ降りる。</text>
+</svg>
