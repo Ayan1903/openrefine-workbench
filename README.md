@@ -16,6 +16,8 @@
 
 どちらの層も `trial.edn` をセッション記述子として共有し、再現可能な分析を目指します。
 
+OpenRefine と XTDB のスライシング方針については [docs/openrefine-xtdb-slicing-direction.md](docs/openrefine-xtdb-slicing-direction.md) を参照してください — 本ワークベンチの操作イメージを示しています。
+
 ### 主要な分析能力
 
 - **Java コード解析** (`jref!` / `jsig!` / `sqlref!`)
@@ -208,7 +210,7 @@ ingest → query → visualize
 
 ```bash
 # Guix 環境で nREPL 起動
-guix shell -m manifest.scm -- clojure -A:xtdb:repl
+guix shell -m manifest.scm -- clojure -M:xtdb:repl
 ```
 
 ```clojure
