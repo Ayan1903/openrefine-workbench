@@ -1,0 +1,21 @@
+{:trial/id   "sample-call-flow-slice"
+ :trial/tool :xtdb-workbench
+ :trial/tags [:java :call-flow :slicing]
+
+ :input/java-roots
+ ["trials/samples/repo"]
+
+ :goal
+ "run-trial から最小の call-flow slicing を実行し、
+  OpenRefine に持ち込める平坦表を exports に出力する。"
+
+ :notes/file "notes.md"
+ :output/dir "exports"
+
+ :phases
+ [{:phase :ingest/jref}
+  {:phase :ingest/jsig}
+  {:phase :analyze/slice-call-flow
+   :params {:root "FooController/foo"
+            :depth 3
+            :output-file "foo-call-flow.tsv"}}]}

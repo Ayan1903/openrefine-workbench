@@ -21,6 +21,7 @@ REPL / AI Agent 向けの統合エントリポイント。
 | `(core/refs ns-prefix)` | `ns-prefix` で始まる名前空間の呼び出しグラフのみ |
 | `(core/call-tree refs root)` | `root` を起点に呼び出し木をテキスト表示（stdout） |
 | `(core/call-tree-str refs root)` | `call-tree` の文字列版（AI Agent / テスト向け） |
+| `(core/slice-results root :depth n :rs refs)` | `root` 起点の call-flow を OpenRefine 向け平坦表で返す |
 | `(core/fan-out)` | 全シンボルの fan-out（依存数）を降順で返す |
 | `(core/fan-out refs)` | refs を指定して fan-out を計算 |
 | `(core/fan-in)` | 全シンボルの fan-in（被依存数）を降順で返す |
@@ -85,6 +86,30 @@ REPL / AI Agent 向けの統合エントリポイント。
 ;; 呼び出し木を表示
 (core/call-tree (core/refs) "workbench.core/ingest!")   ; stdout に木表示
 (core/call-tree-str (core/refs) "workbench.core/tree")  ; 文字列として取得
+
+;; OpenRefine 向けの平坦な call-flow 行集合
+(core/slice-results "FooController/foo"
+                    :depth 2
+                    :rs (core/jrefs :trial "my-trial" :exclude-test true))
+;; => [{:root-method "FooController/foo"
+;;      :method-id "FooController/foo"
+;;      :depth 0
+;;      :direction :forward
+;;      :parent-method nil
+;;      :method-file "src/main/java/com/example/FooController.java"
+;;      :method-start-line 10
+;;      :class "FooController"
+;;      :method "foo"}
+;;     {:root-method "FooController/foo"
+;;      :method-id "BarService/bar"
+;;      :depth 1
+;;      :parent-method "FooController/foo"
+;;      :method-file "src/main/java/com/example/BarService.java"
+;;      :method-start-line 4
+;;      :call-file "src/main/java/com/example/FooController.java"
+;;      :call-line 11
+;;      :class "BarService"
+;;      :method "bar"}]
 
 ;; メトリクス（fan-in / fan-out）
 (core/fan-out)                     ; 依存数降順。高いほど変更影響が広い

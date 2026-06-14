@@ -8,6 +8,7 @@
    完了済みフェーズは XTDB に記録されてスキップされる。
    再実行: (core/reset-phase! \"trial-id\" :ingest/jref)"
   (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [workbench.core :as core]))
 
@@ -29,6 +30,33 @@
     classpath classpath
     classpath-file (some-> classpath-file slurp str/trim not-empty)
     :else nil))
+
+(defn- trial-base-dir
+  "trial.edn のあるディレクトリを返す。"
+  [trial]
+  (some-> (:trial/file trial) io/file .getParentFile .getPath))
+
+(defn- output-path
+  "trial の output/dir 配下に出力するファイルの絶対/相対パスを返す。"
+  [trial filename]
+  (let [base (or (trial-base-dir trial) ".")
+        out  (or (:output/dir trial) "exports")]
+    (str (io/file base out filename))))
+
+(defn- tsv-escape [v]
+  (-> (str (or v ""))
+      (str/replace #"\t" " ")
+      (str/replace #"\r?\n" " ")))
+
+(defn- write-tsv!
+  "rows を TSV として path に書き出す。"
+  [path columns rows]
+  (io/make-parents path)
+  (let [header (str/join "\t" (map name columns))
+        lines  (map (fn [row]
+                      (str/join "\t" (map #(tsv-escape (get row %)) columns)))
+                    rows)]
+    (spit path (str header "\n" (str/join "\n" lines) (when (seq lines) "\n")))))
 
 (defmethod run-phase! :ingest/jref [trial _]
   (let [n (core/jref! (:input/java-roots trial) :trial (:trial/id trial))]
@@ -130,6 +158,29 @@
                           (group-by :class)
                           (sort-by (comp count second) >))]
       (println (format "  %-50s %2d メソッド" cls (count ms))))))
+
+(defmethod run-phase! :analyze/slice-call-flow [trial phase-spec]
+  (let [trial-id     (:trial/id trial)
+        {:keys [root depth direction exclude-test output-file]
+         :or   {depth 2 direction :forward exclude-test true
+                output-file "slice-call-flow.tsv"}} (:params phase-spec)
+        _            (when-not root
+                       (throw (ex-info ":analyze/slice-call-flow requires :params {:root ...}"
+                                       {:phase-spec phase-spec})))
+        rs           (core/jrefs :trial trial-id :exclude-test exclude-test)
+        method-locs  (core/method-locations :trial trial-id)
+        rows         (core/slice-results root :depth depth :direction direction
+                                         :rs rs :method-locations method-locs)
+        path         (output-path trial output-file)
+        columns      [:root-method :method-id :class :method :depth :direction
+                      :parent-method
+                      :method-file :method-start-line :method-end-line
+                      :call-file :call-line
+                      :edge-kind]]
+    (write-tsv! path columns rows)
+    (println (str "  root: " root))
+    (println (str "  rows: " (count rows)))
+    (println (str "  wrote: " path))))
 
 (defmethod run-phase! :generate/tests [trial phase-spec]
   (let [trial-id (:trial/id trial)
@@ -340,7 +391,8 @@
   (when (empty? args)
     (println "Usage: workbench.runner <trial.edn>")
     (System/exit 1))
-  (let [trial (-> (first args) slurp edn/read-string)]
+  (let [trial-file (first args)
+        trial      (-> trial-file slurp edn/read-string (assoc :trial/file trial-file))]
     (println (str "=== trial: " (:trial/id trial) " ==="))
     (core/start!)
     (try

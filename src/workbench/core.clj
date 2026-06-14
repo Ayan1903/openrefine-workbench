@@ -173,6 +173,25 @@
   [& {:keys [trial cls method]}]
   (jref/jsigs (node) :trial trial :class cls :method method))
 
+(defn method-locations
+  "XTDB :jsigs から、ClassName/methodName → 定義位置のマップを返す。
+   同名メソッドが複数ある場合は start-line が最小のものを優先する。"
+  [& {:keys [trial]}]
+  (->> (jsigs :trial trial)
+       (reduce (fn [acc sig]
+                 (let [sym      (str (:jsig/class sig) "/" (:jsig/method sig))
+                       current  (get acc sym)
+                       incoming {:method-file (:jsig/file sig)
+                                 :method-start-line (:jsig/start-line sig)
+                                 :method-end-line (:jsig/end-line sig)}]
+                   (if (or (nil? current)
+                           (and (:method-start-line incoming)
+                                (or (nil? (:method-start-line current))
+                                    (< (:method-start-line incoming) (:method-start-line current)))))
+                     (assoc acc sym incoming)
+                     acc)))
+               {})))
+
 (defn tref!
   "テストクラス（*Test.java）の構造を解析して XTDB :test-refs テーブルに取り込む（差分同期・冪等）。
 
@@ -645,6 +664,118 @@
   "call-tree と同じだが文字列として返す（AI Agent / テスト向け）。"
   [refs root]
   (visualize/call-tree-str refs root))
+
+(defn- symbol->parts
+  "ClassName/methodName 形式のシンボルを class / method に分解する。
+   method がない場合は class のみ返す。"
+  [sym]
+  (let [[cls method] (str/split (or sym "") #"/" 2)]
+    {:class cls
+     :method method}))
+
+(defn- select-root-symbols
+  "root がメソッドならそのまま 1 件、クラスなら配下メソッド群を返す。"
+  [graph root]
+  (if (str/includes? root "/")
+    [root]
+    (let [prefix (str root "/")]
+      (->> (keys graph)
+           (filter #(str/starts-with? % prefix))
+           sort
+           vec))))
+
+(defn slice-results
+  "呼び出し関係 refs から、起点 root を中心とした平坦なスライス結果を返す。
+
+   返す各行は OpenRefine に持ち込みやすいように、
+   root / method / depth / parent / call site 情報を 1 行にまとめる。
+
+   opts:
+     :depth     - 探索深さ（デフォルト 1）
+     :direction - :forward（呼び出し先）または :backward（呼び出し元）
+     :rs        - 対象 refs（デフォルト (refs)）
+
+   root に '/' がない場合はクラス名とみなし、そのクラス配下の全メソッドを起点にする。
+
+   例:
+     (slice-results \"FooController/foo\" :depth 2 :rs (jrefs :trial \"demo\"))
+     (slice-results \"FooController\"     :depth 1 :rs (jrefs :trial \"demo\"))"
+  [root & {:keys [depth direction rs method-locations]
+           :or   {depth 1 direction :forward}}]
+  (let [rs           (or rs (refs))
+        valid-dir?   (#{:forward :backward} direction)
+        _            (when-not valid-dir?
+                       (throw (ex-info "direction must be :forward or :backward"
+                                       {:direction direction})))
+        edges        (mapv (fn [{:keys [from to file line] :as r}]
+                             {:from from
+                              :to to
+                              :file file
+                              :line line
+                              :kind (or (:kind r) (:ref/kind r))})
+                           rs)
+        graph        (if (= direction :forward)
+                       (group-by :from edges)
+                       (group-by :to   edges))
+        roots        (select-root-symbols graph root)
+        visited0     (into {}
+                           (map (fn [sym]
+                                   (let [loc (get method-locations sym)]
+                                    [sym (merge {:root-method root
+                                                 :method-id sym
+                                                 :depth 0
+                                                 :direction direction
+                                                 :parent-method nil
+                                                 :method-file (:method-file loc)
+                                                 :method-start-line (:method-start-line loc)
+                                                 :method-end-line (:method-end-line loc)
+                                                 :call-file nil
+                                                 :call-line nil
+                                                 :edge-kind :root}
+                                                (symbol->parts sym))]))
+                                roots))]
+    (loop [queue   (into clojure.lang.PersistentQueue/EMPTY
+                         (map (fn [sym] [sym 0]) roots))
+           visited visited0]
+      (if (empty? queue)
+        (->> visited
+             vals
+             (sort-by (juxt :depth :class :method-id))
+             vec)
+        (let [[sym d] (peek queue)
+              queue'  (pop queue)]
+          (if (>= d depth)
+            (recur queue' visited)
+            (let [next-edges (get graph sym [])]
+              (let [next-queue
+                    (reduce (fn [q edge]
+                              (let [neighbor (if (= direction :forward) (:to edge) (:from edge))]
+                                (if (contains? visited neighbor)
+                                  q
+                                  (conj q [neighbor (inc d)]))))
+                            queue'
+                            next-edges)
+                    next-visited
+                    (reduce (fn [acc edge]
+                              (let [neighbor (if (= direction :forward) (:to edge) (:from edge))]
+                                (if (contains? acc neighbor)
+                                  acc
+                                  (assoc acc neighbor
+                                         (merge {:root-method root
+                                                 :method-id neighbor
+                                                 :depth (inc d)
+                                                 :direction direction
+                                                 :parent-method sym
+                                                 :method-file (:method-file (get method-locations neighbor))
+                                                 :method-start-line (:method-start-line (get method-locations neighbor))
+                                                 :method-end-line (:method-end-line (get method-locations neighbor))
+                                                 :call-file (:file edge)
+                                                 :call-line (:line edge)
+                                                 :edge-kind (:kind edge)}
+                                                (symbol->parts neighbor))))))
+                            visited
+                            next-edges)]
+                (recur next-queue next-visited)))))))))
 
 (defn export-gexf!
   "refs を GEXF ファイルとして書き出す。Gephi でインポート可能。

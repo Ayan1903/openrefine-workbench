@@ -1,11 +1,22 @@
 package com.example;
 
 public class BarService {
-    public void bar() {
-        System.out.println("bar");
+    private final BazRepository bazRepository;
+    private final AuditClient auditClient;
+
+    public BarService(BazRepository bazRepository, AuditClient auditClient) {
+        this.bazRepository = bazRepository;
+        this.auditClient = auditClient;
     }
 
-    public String build() {
-        return String.valueOf(42);
+    public String bar() {
+        String message = bazRepository.fetchMessage();
+        auditClient.recordAccess();
+        return message;
+    }
+
+    public String buildSummary() {
+        String raw = bazRepository.fetchSummary();
+        return FormatterUtil.wrap(raw);
     }
 }

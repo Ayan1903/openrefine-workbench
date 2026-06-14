@@ -1,0 +1,6 @@
+root-method	method-id	class	method	depth	direction	parent-method	method-file	method-start-line	method-end-line	call-file	call-line	edge-kind
+FooController/foo	FooController/foo	FooController	foo	0	:forward		src/main/java/com/example/FooController.java	10	12			:root
+FooController/foo	BarService/bar	BarService	bar	1	:forward	FooController/foo	src/main/java/com/example/BarService.java	12	16	src/main/java/com/example/FooController.java	11	
+FooController/foo	AuditClient/recordAccess	AuditClient	recordAccess	2	:forward	BarService/bar	src/main/java/com/example/AuditClient.java	4	6	src/main/java/com/example/BarService.java	14	
+FooController/foo	BazRepository/fetchMessage	BazRepository	fetchMessage	2	:forward	BarService/bar	src/main/java/com/example/BazRepository.java	4	6	src/main/java/com/example/BarService.java	13	
+FooController/foo	FormatterUtil/wrap	FormatterUtil	wrap	3	:forward	BazRepository/fetchMessage	src/main/java/com/example/FormatterUtil.java	4	6	src/main/java/com/example/BazRepository.java	5	

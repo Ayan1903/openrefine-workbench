@@ -8,7 +8,10 @@ public class FooController {
     }
 
     public String foo() {
-        barService.bar();
-        return "foo";
+        return barService.bar();
+    }
+
+    public String summary() {
+        return barService.buildSummary();
     }
 }

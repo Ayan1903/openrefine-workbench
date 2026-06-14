@@ -236,6 +236,18 @@
     (assert-pos "topo-sort 件数" (count sorted))
     (assert= "重複なし" (count sorted) (count (distinct sorted))))
 
+  ;; core/slice-results — call-flow の平坦表を返せること
+  (println "\n=== core/slice-results ===")
+  (let [rs      (core/jrefs :trial "smoke-java2" :exclude-test true)
+        rows    (core/slice-results "FooController/foo" :depth 2 :rs rs)
+        ids     (set (map :method-id rows))
+        child   (some #(when (= "BarService/bar" (:method-id %)) %) rows)]
+    (assert-pos "slice-results 件数" (count rows))
+    (assert= "起点メソッドを含む" true (contains? ids "FooController/foo"))
+    (assert= "呼び出し先メソッドを含む" true (contains? ids "BarService/bar"))
+    (assert= "深さ 1 の呼び出し先が見つかる" 1 (:depth child))
+    (assert= "親メソッドが記録される" "FooController/foo" (:parent-method child)))
+
   ;; core/cochange! — openrefine-work 自身の git 履歴で確認
   (println "\n=== core/cochange! ===")
   (let [n (core/cochange! "." :trial "smoke-git" :filter-path "src")]

@@ -243,7 +243,7 @@
 
 (defn- method->sig-doc
   "MethodDeclaration 1 件を :jsigs ドキュメントに変換する。"
-  [^MethodDeclaration md cls-name pkg trial]
+  [^MethodDeclaration md cls-name pkg rel-path trial]
   (let [mname   (.getNameAsString md)
         params  (->> (.getParameters md)
                      (mapv (fn [p]
@@ -255,54 +255,66 @@
         throws  (->> (.getThrownExceptions md)
                      (mapv #(.asString %)))
         mods    (->> (.getModifiers md)
-                     (mapv #(-> % .getKeyword .asString)))]
+                     (mapv #(-> % .getKeyword .asString)))
+        begin   (opt->val (.getBegin md))
+        end     (opt->val (.getEnd md))]
     {:xt/id         (str "jsig/" (or trial "_") "/" cls-name "/" mname "(" ptypes ")")
      :jsig/trial    trial
+     :jsig/file     rel-path
      :jsig/package  pkg
      :jsig/class    cls-name
      :jsig/method   mname
      :jsig/params   params
      :jsig/return   ret
      :jsig/throws   throws
-     :jsig/mods     mods}))
+     :jsig/mods     mods
+     :jsig/start-line (some-> begin .-line)
+     :jsig/end-line   (some-> end .-line)}))
 
 (defn- extract-sigs-from-file
   "1 つの .java ファイルを解析し、メソッドシグネチャドキュメントのシーケンスを返す。"
-  [^java.io.File f trial]
-  (try
-    (let [cu  (StaticJavaParser/parse f)
+  [root ^java.io.File f trial]
+  (let [abs      (.getAbsolutePath f)
+        root-abs (.getAbsolutePath (io/file root))
+        rel      (subs abs (inc (count root-abs)))]
+    (try
+      (let [cu  (StaticJavaParser/parse f)
           pkg (-> cu .getPackageDeclaration
                   (.map #(.getNameAsString %))
                   (.orElse ""))]
-      (concat
-        ;; 通常クラス・インターフェース
-        (->> (.findAll cu ClassOrInterfaceDeclaration)
-             (mapcat (fn [^ClassOrInterfaceDeclaration cls]
-                       (let [cls-name (.getNameAsString cls)]
-                         (->> (.findAll cls MethodDeclaration)
-                              (map #(method->sig-doc % cls-name pkg trial)))))))
-        ;; Java record — コンポーネントをアクセサとして登録 + 明示的メソッド
-        (->> (.findAll cu RecordDeclaration)
-             (mapcat (fn [^RecordDeclaration rec]
-                       (let [cls-name (.getNameAsString rec)
-                             accessors (->> (.getParameters rec)
-                                           (map (fn [p]
-                                                  {:xt/id        (str "jsig/" (or trial "_") "/" cls-name "/" (.getNameAsString p) "()")
-                                                   :jsig/trial   trial
-                                                   :jsig/package pkg
-                                                   :jsig/class   cls-name
-                                                   :jsig/method  (.getNameAsString p)
-                                                   :jsig/params  []
-                                                   :jsig/return  (.asString (.getType p))
-                                                   :jsig/throws  []
-                                                   :jsig/mods    ["public"]})))
-                             methods  (->> (.findAll rec MethodDeclaration)
-                                          (map #(method->sig-doc % cls-name pkg trial)))]
-                         (concat accessors methods)))))))
+        (concat
+          ;; 通常クラス・インターフェース
+          (->> (.findAll cu ClassOrInterfaceDeclaration)
+               (mapcat (fn [^ClassOrInterfaceDeclaration cls]
+                         (let [cls-name (.getNameAsString cls)]
+                           (->> (.findAll cls MethodDeclaration)
+                                (map #(method->sig-doc % cls-name pkg rel trial)))))))
+          ;; Java record — コンポーネントをアクセサとして登録 + 明示的メソッド
+          (->> (.findAll cu RecordDeclaration)
+               (mapcat (fn [^RecordDeclaration rec]
+                         (let [cls-name (.getNameAsString rec)
+                               accessors (->> (.getParameters rec)
+                                              (map (fn [p]
+                                                     (let [begin (opt->val (.getBegin p))]
+                                                       {:xt/id          (str "jsig/" (or trial "_") "/" cls-name "/" (.getNameAsString p) "()")
+                                                        :jsig/trial     trial
+                                                        :jsig/file      rel
+                                                        :jsig/package   pkg
+                                                        :jsig/class     cls-name
+                                                        :jsig/method    (.getNameAsString p)
+                                                        :jsig/params    []
+                                                        :jsig/return    (.asString (.getType p))
+                                                        :jsig/throws    []
+                                                        :jsig/mods      ["public"]
+                                                        :jsig/start-line (some-> begin .-line)
+                                                        :jsig/end-line   (some-> begin .-line)}))))
+                               methods  (->> (.findAll rec MethodDeclaration)
+                                            (map #(method->sig-doc % cls-name pkg rel trial)))]
+                           (concat accessors methods)))))))
 
-    (catch Exception e
-      (println (str "[jsig] parse error: " (.getName f) " — " (.getMessage e)))
-      [])))
+      (catch Exception e
+        (println (str "[jsig] parse error: " (.getName f) " — " (.getMessage e)))
+        []))))
 
 (defn jsig!
   "Java ソースのメソッドシグネチャを解析して XTDB :jsigs テーブルに取り込む（差分同期・冪等）。
@@ -315,8 +327,9 @@
      (jsig! node [\"trials/experiments/2026-04-28-tradehub/repo\"] :trial \"tradehub\")"
   [node paths & {:keys [trial]}]
   (let [docs    (->> paths
-                     (mapcat java-files)
-                     (mapcat #(extract-sigs-from-file % trial))
+                     (mapcat (fn [root]
+                               (mapcat #(extract-sigs-from-file root % trial)
+                                       (java-files root))))
                      vec)
         new-ids (set (map :xt/id docs))
         old-ids (->> (xt/q node '(from :jsigs [{:xt/id id :jsig/trial t}]))
