@@ -34,14 +34,15 @@ seed-history.json
 
 ```
 trial.edn
-    ↓ REPL または analyze.clj
+    ↓ ./bin/run-trial trial.edn
 [ingest phase]
     ↓ jref! / jsig! で Java 呼び出しグラフを XTDB へ投入
   ↓ :ingest/jacoco（jacoco-xml 既存取り込み or module-dir から生成して取り込み）
     ↓
 [analyze phase]
-    ↓ query / hotspots / uncovered-sql-methods 等で分析
+    ↓ query / hotspots / uncovered-sql-methods / slice-call-flow 等で分析
     ↓ notes.md に観察記録
+    ↓ exports/ に TSV / CSV / JSON を出力
     ↓
 [generate phase]
     ↓ gen-tests-uncovered でテストスケルトンを生成
@@ -252,6 +253,28 @@ guix shell -m manifest.scm -- clojure -A:xtdb:repl
 ```bash
 guix shell -m manifest.scm -- clojure -A:xtdb -M trials/experiments/YOUR-TRIAL-ID/analyze.clj
 ```
+
+`bin/run-trial` を使う場合は、`trial.edn` の `:phases` に
+`ingest/*` / `analyze/*` / `generate/*` を並べて実行する。
+特に `analyze` フェーズは、XTDB 上の結果を `exports/` に TSV などで出力する用途に向いている。
+
+### sample trial の例
+
+最小の call-flow slicing を `run-trial` で確認したい場合は、
+次の sample trial が使える。
+
+```bash
+bin/run-trial trials/samples/call-flow-slice/trial.edn
+```
+
+この trial は次を実行する。
+
+1. `:ingest/jref`
+2. `:ingest/jsig`
+3. `:analyze/slice-call-flow`
+
+結果は `trials/samples/call-flow-slice/exports/foo-call-flow.tsv` に出力される。
+この TSV は OpenRefine だけでなく、Excel や AI Agent に渡す中間表としても使える。
 
 ---
 

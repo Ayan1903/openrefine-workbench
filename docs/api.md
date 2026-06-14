@@ -110,6 +110,7 @@ REPL / AI Agent 向けの統合エントリポイント。
 ;;      :call-line 11
 ;;      :class "BarService"
 ;;      :method "bar"}]
+;; この形は OpenRefine だけでなく、TSV/CSV にして Excel や AI Agent に渡す中間表としても使える。
 
 ;; メトリクス（fan-in / fan-out）
 (core/fan-out)                     ; 依存数降順。高いほど変更影響が広い

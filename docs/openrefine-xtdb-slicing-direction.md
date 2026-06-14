@@ -87,6 +87,14 @@ OpenRefine     = スライス探索 UI / 編集 UI
 
 このループにより、自動計算と人間判断を分離しつつ接続できる。
 
+なお、ここでいう中間結果は OpenRefine 専用形式である必要はない。
+TSV / CSV / JSON のような平坦表として出しておけば、
+OpenRefine だけでなく Excel や AI Agent のチャット文脈でも使い回せる。
+
+特に call-flow のようなスライス結果は、
+ソース全文をそのまま渡す前の「圧縮済みコンテキスト」として有効であり、
+人間にも AI にも読みやすい。
+
 ---
 
 ## 4. スライシングの考え方
@@ -173,6 +181,30 @@ OpenRefine には 1 枚の巨大テーブルを渡すより、役割別に分け
   - `root-method`, `method-id`, `depth`, `direction`, `reason`
 
 この分割により、OpenRefine 側では `cross()` を使って必要な情報を重ねられる。
+
+実際には、最初から完全に分割した複数表で始めなくてもよい。
+当面の call-flow では、次のような平坦表 1 枚でも十分に価値がある。
+
+- `slice-call-flow`
+  - `root-method`
+  - `method-id`
+  - `class`
+  - `method`
+  - `depth`
+  - `parent-method`
+  - `method-file`
+  - `method-start-line`
+  - `method-end-line`
+  - `call-file`
+  - `call-line`
+
+この形なら、
+
+- OpenRefine に読み込んで facet / filter する
+- Excel で深さや親子関係を見る
+- AI Agent に渡す前の圧縮コンテキストにする
+
+といった使い方を同じデータで兼用できる。
 
 ### join key の重要性
 
@@ -281,6 +313,11 @@ CSV / JSON 化できれば十分な価値がある。
 
 ここで重要なのは、完全な答えを 1 回で出すことではなく、
 OpenRefine 上で追跡を始められる素材を安定して出せるようにすることである。
+
+当面の実装としては、`run-trial` から `:analyze/slice-call-flow` を実行し、
+`exports/*.tsv` に平坦表として書き出せる形が扱いやすい。
+これにより、OpenRefine に持ち込む前の段階でも、
+Excel や AI Agent で slice を確認できる。
 
 ### Step 3. OpenRefine で読みやすい表にする
 
