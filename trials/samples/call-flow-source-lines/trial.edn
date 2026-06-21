@@ -1,0 +1,23 @@
+{:trial/id   "sample-call-flow-source-lines"
+ :trial/tool :xtdb-workbench
+ :trial/tags [:java :call-flow :source-lines :slicing]
+
+ :input/java-roots
+ ["trials/samples/repo"]
+
+ :goal
+ "source-lines-enriched.tsv を主表として使い、
+  行単位でコードを読み進めるための基本セットを生成する。"
+
+ :notes/file "notes.md"
+ :output/dir "exports"
+
+ :phases
+ [{:phase :ingest/jref}
+  {:phase :ingest/jsig}
+  {:phase :analyze/export-method-spans
+   :params {:scope {:package-prefixes ["com.example"]}
+            :output-file "foo-method-spans.tsv"}}
+  {:phase :analyze/export-source-lines
+   :params {:scope {:package-prefixes ["com.example"]}
+            :output-file "foo-source-lines-enriched.tsv"}}]}

@@ -69,6 +69,38 @@
 (defn- method-id-from-sig [sig]
   (str (:jsig/class sig) "/" (:jsig/method sig)))
 
+(defn- normalize-export-params
+  "export-* 系 phase の params を正規化する。
+
+   新形式:
+   {:scope {:scope :all
+            :package-prefixes [...]
+            :classes [...]
+            :files [...]}
+    :slice {:root \"FooController/foo\"
+            :depth 3}
+    :output-file ...}
+
+   旧形式:
+   {:scope :all
+    :package-prefixes [...]
+    :classes [...]
+    :files [...]
+    :root ...
+    :depth ...}
+
+   旧形式も後方互換で受ける。"
+  [{:keys [scope slice] :as params}]
+  (let [scope-map (if (map? scope) scope {})
+        slice-map (if (map? slice) slice {})]
+    {:scope        (or (:scope scope-map) (:scope params))
+     :package-prefixes (or (:package-prefixes scope-map) (:package-prefixes params))
+     :classes      (or (:classes scope-map) (:classes params))
+     :files        (or (:files scope-map) (:files params))
+     :root         (or (:root slice-map) (:root params))
+     :depth        (or (:depth slice-map) (:depth params) 2)
+     :output-file  (:output-file params)}))
+
 (defn- java-file->class-name [rel-path]
   (some-> rel-path io/file .getName (str/replace #"\.java$" "")))
 
@@ -363,8 +395,10 @@
     (println (str "  wrote: " path))))
 
 (defmethod run-phase! :analyze/export-method-spans [trial phase-spec]
-  (let [{:keys [output-file] :or {output-file "method-spans.tsv"}} (:params phase-spec)
-        {:keys [selected-files slice-context]} (resolve-export-scope trial (:params phase-spec))
+  (let [{:keys [output-file] :or {output-file "method-spans.tsv"} :as params}
+        (normalize-export-params (:params phase-spec))
+        {:keys [selected-files slice-context]} (resolve-export-scope trial params)
+        slice? (boolean (:root params))
         {:keys [spans slice-by-id]} (merge {:spans (->> (core/jsigs :trial (:trial/id trial))
                                                         (map (fn [sig]
                                                                {:method-id         (method-id-from-sig sig)
@@ -388,15 +422,18 @@
                   (filter (fn [{:keys [file]}] (some #{file} selected-files)))
                   vec)
         path (output-path trial output-file)
-        columns [:method-id :class :method :file :method-start-line :method-end-line
-                 :return-type :mods :params :slice-depth :in-slice-method?]]
+        columns (cond-> [:method-id :class :method :file :method-start-line :method-end-line
+                         :return-type :mods :params]
+                  slice? (into [:slice-depth :in-slice-method?]))]
     (write-tsv! path columns rows)
     (println (str "  rows: " (count rows)))
     (println (str "  wrote: " path))))
 
 (defmethod run-phase! :analyze/export-source-lines [trial phase-spec]
-  (let [{:keys [output-file] :or {output-file "source-lines-enriched.tsv"}} (:params phase-spec)
-        {:keys [catalog selected-files slice-context]} (resolve-export-scope trial (:params phase-spec))
+  (let [{:keys [output-file] :or {output-file "source-lines-enriched.tsv"} :as params}
+        (normalize-export-params (:params phase-spec))
+        {:keys [catalog selected-files slice-context]} (resolve-export-scope trial params)
+        slice? (boolean (:root params))
         {:keys [slice-by-id spans-by-file calls-by-line]} (merge {:slice-by-id {}
                                                                   :spans-by-file (->> (core/jsigs :trial (:trial/id trial))
                                                                                       (map (fn [sig]
@@ -417,9 +454,9 @@
                           (line-enrichment catalog-by-file file line text spans-by-file calls-by-line slice-by-id)))
                    vec)
         path (output-path trial output-file)
-        columns [:file :package :file-class :line :text :blank-line? :class :method-id :method-start-line :method-end-line
-                 :slice-root-method :slice-depth :slice-parent :in-slice-method?
-                 :call-count :call-to]]
+        columns (cond-> [:file :package :file-class :line :text :blank-line? :class :method-id :method-start-line :method-end-line]
+                  slice? (into [:slice-root-method :slice-depth :slice-parent :in-slice-method?])
+                  true (into [:call-count :call-to]))]
     (write-tsv! path columns rows)
     (println (str "  files: " (count files)))
     (println (str "  rows: " (count rows)))

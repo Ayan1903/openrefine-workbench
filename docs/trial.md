@@ -26,8 +26,7 @@ seed-history.json
     ↓
 [stabilize phase]
     ↓ Clojure / Tablecloth でコード化
-    ↓ 再実行可能な処理に定着
-    ↓ exports/ に結果出力
+    ↓ 再実行可能な処理に定着し、exports/ に結果出力
 ```
 
 ### :xtdb-workbench
@@ -200,7 +199,7 @@ $EDITOR trials/YOUR-TRIAL-ID/trial.edn
 | `:trial/tool` | `:xtdb-workbench` |
 | `:input/java-roots` | jref!/jsig! の対象ディレクトリ（複数可） |
 | `:input/clj-roots` | xref! の対象ディレクトリ（任意） |
-| `:input/roots` | Java/Clojure 両方を含む場合の簡略指定 |
+| `:input/roots` | 旧来の補助キー。trial 記述上のメモとしては残っているが、現在の runner 実装は `:input/java-roots` / `:input/clj-roots` を使う |
 | `:maven/classpath-config` | (任意) Maven 依存関係解決設定（テストコンパイル時に必要） |
 | `:maven/classpath-config.repo-root` | Maven プロジェクトのルートディレクトリ |
 | `:maven/classpath-config.module` | 対象 Maven モジュール（複数モジュール構成の場合） |
@@ -261,7 +260,7 @@ guix shell -m manifest.scm -- clojure -A:xtdb -M trials/experiments/YOUR-TRIAL-I
 ### sample trial の例
 
 最小の call-flow slicing を `run-trial` で確認したい場合は、
-次の sample trial が使える。
+次の trial が使える。
 
 ```bash
 bin/run-trial trials/samples/call-flow-slice/trial.edn
@@ -272,20 +271,35 @@ bin/run-trial trials/samples/call-flow-slice/trial.edn
 1. `:ingest/jref`
 2. `:ingest/jsig`
 3. `:analyze/slice-call-flow`
-4. `:analyze/export-method-spans`
-5. `:analyze/export-source-lines`
 
 結果は次に出力される。
 
 - `trials/samples/call-flow-slice/exports/foo-call-flow.tsv`
-- `trials/samples/call-flow-slice/exports/foo-method-spans.tsv`
-- `trials/samples/call-flow-slice/exports/foo-source-lines-enriched.tsv`
 
-`foo-call-flow.tsv` は root からの呼び出し骨格を見る表で、
+`foo-call-flow.tsv` は root からの呼び出し骨格を見る最小表で、
+OpenRefine・Excel・AI Agent に渡す中間表として使える。
+
+`source-lines-enriched.tsv` を主表にしてコード行から読みたい場合は、
+次の trial を使う。
+
+```bash
+bin/run-trial trials/samples/call-flow-source-lines/trial.edn
+```
+
+この sample は次を出力する。
+
+- `trials/samples/call-flow-source-lines/exports/foo-method-spans.tsv`
+- `trials/samples/call-flow-source-lines/exports/foo-source-lines-enriched.tsv`
+
 `foo-method-spans.tsv` / `foo-source-lines-enriched.tsv` は
-`trial.edn` 側の `:package-prefixes` / `:classes` / `:files` / `:scope :all`
+`trial.edn` 側の `:scope {:package-prefixes ...}` / `:scope {:classes ...}` /
+`:scope {:files ...}` / `:scope {:scope :all}`
 で source scope を決めて出力できる。
-これらの TSV は OpenRefine だけでなく、Excel や AI Agent に渡す中間表としても使える。
+必要になった時点で別途 `call-flow-slice` sample を実行し、
+`foo-call-flow.tsv` を重ねて使う。
+また、必要なら export phase に `:slice {:root ... :depth ...}` を与えて、
+root からの深さや slice 含有フラグを主表へ注釈できる。
+これらの TSV も OpenRefine・Excel・AI Agent に渡す中間表として使える。
 
 ---
 
