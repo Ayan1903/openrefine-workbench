@@ -1,21 +1,6 @@
 name: smoke-test
 
 on:
-  # push:
-  #   branches: ["main"]
-  #   paths:
-  #     - "src/**"
-  #     - "test/**"
-  #     - "deps.edn"
-  #     - "manifest.scm"
-  #     - ".github/workflows/smoke.yml"
-  # pull_request:
-  #   paths:
-  #     - "src/**"
-  #     - "test/**"
-  #     - "deps.edn"
-  #     - "manifest.scm"
-  #     - ".github/workflows/smoke.yml"
   workflow_dispatch:
 
 jobs:
@@ -44,6 +29,18 @@ jobs:
 
       - name: Setup Guix
         uses: PromyLoph/guix-install-action@v1.6
+
+      - name: Ensure one_embedding.txt exists
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          p = pathlib.Path('one_embedding.txt')
+          if not p.exists():
+              json.dump([0.0]*384, open(p, 'w', encoding='utf-8'))
+              print("Created one_embedding.txt (384 zeros)")
+          else:
+              print("one_embedding.txt already exists")
+          PY
 
       - name: Run smoke test via Guix
         run: guix shell -m manifest.scm -- clojure -A:xtdb -M test/smoke_test.clj trials/samples/repo
