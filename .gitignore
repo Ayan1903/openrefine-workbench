@@ -17,3 +17,4 @@ docker-compose.yml.bak
 # Editor / OS
 *.bak
 *.log
+bench_ci.csv

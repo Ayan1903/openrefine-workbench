@@ -1,0 +1,10 @@
+﻿[
+  {
+    "query": "example query 1",
+    "embedding_file": "one_embedding.txt"
+  },
+  {
+    "query": "example query 2",
+    "embedding_file": "one_embedding.txt"
+  }
+]
