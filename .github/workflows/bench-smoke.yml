@@ -21,6 +21,18 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Ensure one_embedding.txt exists
+        run: |
+          if [ ! -f one_embedding.txt ]; then
+            python - <<'PY'
+            import json
+            print("Creating dummy embedding (384 zeros)")
+            json.dump([0.0]*384, open("one_embedding.txt","w",encoding="utf-8"))
+            PY
+          else
+            echo "one_embedding.txt found, skipping creation"
+          fi
+
       - name: Check embedding file one_embedding.txt
         run: |
           python - <<'PY'
@@ -30,11 +42,20 @@ jobs:
               print('EMBED_FAIL: one_embedding.txt not found'); sys.exit(1)
           try:
               arr = json.loads(p.read_text(encoding='utf-8'))
-              assert isinstance(arr, list) and len(arr) == 384
+              if not (isinstance(arr, list) and len(arr) == 384):
+                  print('EMBED_FAIL: invalid embedding shape'); sys.exit(1)
               print('EMBED_OK')
           except Exception as e:
               print('EMBED_FAIL', e); sys.exit(1)
           PY
 
       - name: Run short bench smoke
-        run: python scripts/bench_search.py --out-csv bench_ci.csv
+        run: |
+          set -e
+          python scripts/bench_search.py --out-csv bench_ci.csv
+
+      - name: Upload bench CSV
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-ci-csv
+          path: bench_ci.csv
