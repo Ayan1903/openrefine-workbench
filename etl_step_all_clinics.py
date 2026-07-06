@@ -1,57 +1,31 @@
-import psycopg2
+import json
+from datetime import datetime
+from app.db.session import SessionLocal
+from app.db.models import Clinic
 
-conn = psycopg2.connect(
-    dbname="semanticdb",
-    user="postgres",
-    password="123",
-    host="localhost",
-    port="5432"
-)
+if __name__ == "__main__":
+    db = SessionLocal()
 
-cur = conn.cursor()
+    # Загружаем данные из JSON
+    with open("data/clinics.json", "r", encoding="utf-8") as f:
+        rows = json.load(f)
 
-# Берём все строки из clinics_raw
-cur.execute("SELECT * FROM clinics_raw;")
-rows = cur.fetchall()
+    for row in rows:
+        clinic = Clinic(
+            id=row["id"],
+            name=row["name"],
+            type=row["type_org"],
+            address=row["address"],
+            district_id=row["district"],
+            source_id=row["source"],
+            status_id=row["status"],
+            date_checked=datetime.strptime(row["date_checked"], "%Y-%m-%d")
+        )
 
-def get_id(table, value):
-    cur.execute(f"SELECT id FROM {table} WHERE name = %s;", (value,))
-    result = cur.fetchone()
-    return result[0] if result else None
+        db.add(clinic)
+        print(f"Перенесена клиника ID {row['id']}: {row['name']}")
 
-for row in rows:
-    (
-        id,
-        name,
-        type_org,
-        address,
-        phone1,
-        phone2,
-        website,
-        email,
-        working_hours,
-        district,
-        source,
-        date_checked,
-        status,
-        comment
-    ) = row
+    db.commit()
+    db.close()
 
-    district_id = get_id("districts", district)
-    source_id = get_id("sources", source)
-    status_id = get_id("statuses", status)
-
-    cur.execute("""
-        INSERT INTO clinics (id, name, type, address, district_id, source_id, status_id, date_checked)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (id) DO NOTHING;
-    """, (id, name, type_org, address, district_id, source_id, status_id, date_checked))
-
-    print(f"Перенесена клиника ID {id}: {name}")
-
-conn.commit()
-
-print("Все клиники успешно перенесены!")
-
-cur.close()
-conn.close()
+    print("Все клиники успешно перенесены!")
