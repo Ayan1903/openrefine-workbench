@@ -1,0 +1,19 @@
+﻿# Local env and secrets
+.env
+.env.bak
+
+# Build / runtime artifacts
+bench_runs.csv
+one_embedding.txt
+one_embedding.txt.bak
+last_response.json
+last_response_pretty.json
+resp.json
+
+# Local app / containers
+app/
+docker-compose.yml.bak
+
+# Editor / OS
+*.bak
+*.log
