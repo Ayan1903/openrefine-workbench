@@ -1,4 +1,4 @@
-﻿name: smoke-test
+name: smoke-test
 
 on:
   workflow_dispatch:
@@ -31,7 +31,7 @@ jobs:
       - name: Run short bench smoke (Python)
         run: |
           python -m pip install --upgrade pip
-          # Установите зависимости, если они есть (раскомментируйте и поправьте при необходимости)
+          # Раскомментируйте и поправьте, если нужны зависимости:
           # pip install -r requirements.txt
           python scripts/bench_search.py --out-csv bench_ci.csv || true
 
