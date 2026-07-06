@@ -1,0 +1,2 @@
+New-Item -ItemType Directory -Path .github\workflows -Force
+notepad .github\workflows\bench-smoke.yml
