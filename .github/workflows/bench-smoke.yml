@@ -1,2 +1,40 @@
-New-Item -ItemType Directory -Path .github\workflows -Force
-notepad .github\workflows\bench-smoke.yml
+﻿name: Bench Smoke Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  bench-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Check embedding file one_embedding.txt
+        run: |
+          python - <<'PY'
+          import json, sys, pathlib
+          p = pathlib.Path('one_embedding.txt')
+          if not p.exists():
+              print('EMBED_FAIL: one_embedding.txt not found'); sys.exit(1)
+          try:
+              arr = json.loads(p.read_text(encoding='utf-8'))
+              assert isinstance(arr, list) and len(arr) == 384
+              print('EMBED_OK')
+          except Exception as e:
+              print('EMBED_FAIL', e); sys.exit(1)
+          PY
+
+      - name: Run short bench smoke
+        run: python scripts/bench_search.py --out-csv bench_ci.csv
