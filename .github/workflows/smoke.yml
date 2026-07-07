@@ -1,4 +1,4 @@
-﻿name: Smoke Test
+name: Smoke Test
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    fail-fast: false
     timeout-minutes: 10
 
     steps:
@@ -30,19 +31,14 @@ jobs:
 
       - name: Install dependencies
         run: |
-          if [ -f requirements.txt ]; then
-            python -m pip install --upgrade pip
-            pip install -r requirements.txt
-          else
-            echo "No requirements.txt found, skipping pip install"
-          fi
-# GUARDED_INSTALL_MARKER
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Run bench_search smoke
         run: |
           echo "Running bench_search.py..."
-          python scripts/bench_search.py --output bench_ci.csv || echo "bench_search failed with exit code $?"
-          echo "bench_ci.csv generation attempted"
+          python scripts/bench_search.py --output bench_ci.csv
+          echo "bench_ci.csv generated"
 
       - name: Upload artifact bench_ci.csv
         uses: actions/upload-artifact@v4
