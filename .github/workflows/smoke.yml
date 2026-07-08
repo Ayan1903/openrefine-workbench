@@ -9,7 +9,6 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    fail-fast: false
     timeout-minutes: 10
 
     steps:
@@ -40,9 +39,20 @@ jobs:
           python scripts/bench_search.py --out-csv bench_ci.csv
           echo "bench_ci.csv generated"
 
+      - name: Check bench_ci.csv
+        run: |
+          echo "PWD: $(pwd)"
+          if [ -f bench_ci.csv ]; then
+            echo "bench_ci.csv exists"
+            head -n 20 bench_ci.csv
+          else
+            echo "bench_ci.csv not found"
+            ls -la
+            exit 1
+          fi
+
       - name: Upload artifact bench_ci.csv
         uses: actions/upload-artifact@v4
         with:
           name: bench_ci
           path: bench_ci.csv
-
