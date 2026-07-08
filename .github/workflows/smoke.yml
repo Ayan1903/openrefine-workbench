@@ -1,41 +1,51 @@
-﻿name: smoke-test
+﻿name: Smoke Test
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [ main, ci/* ]
+  pull_request:
+    branches: [ main ]
 
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Cache pip
+        uses: actions/cache@v4
         with:
-          python-version: '3.x'
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
-      - name: Ensure one_embedding.txt exists
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
         run: |
-          python - <<'PY'
-          import json, pathlib
-          p = pathlib.Path('one_embedding.txt')
-          if not p.exists():
-              json.dump([0.0]*384, open(p, 'w', encoding='utf-8'))
-              print("Created one_embedding.txt (384 zeros)")
-          else:
-              print("one_embedding.txt already exists")
-          PY
+          if [ -f requirements.txt ]; then
+            python -m pip install --upgrade pip
+            pip install -r requirements.txt
+          else
+            echo "No requirements.txt found, skipping pip install"
+          fi
+# GUARDED_INSTALL_MARKER
 
-      - name: Run short bench smoke (Python)
+      - name: Run bench_search smoke
         run: |
-          python -m pip install --upgrade pip
-          python scripts/bench_search.py --out-csv bench_ci.csv || true
+          echo "Running bench_search.py..."
+          python scripts/bench_search.py --output bench_ci.csv || echo "bench_search failed with exit code $?"
+          echo "bench_ci.csv generation attempted"
 
-      - name: Upload bench artifact if exists
-        if: always()
+      - name: Upload artifact bench_ci.csv
         uses: actions/upload-artifact@v4
         with:
-          name: bench-ci-csv
+          name: bench_ci
           path: bench_ci.csv
